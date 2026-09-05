@@ -1,6 +1,6 @@
 {
   "name": "moallem-v2",
-  "version": "2.0.0",
+  "version": "2.5.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -18,7 +18,9 @@
     "react-dom": "latest",
     "lucide-react": "latest",
     "@capacitor/core": "^7.4.3",
-    "@capacitor/android": "^7.4.3"
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/app": "^7.0.0",
+    "@capgo/capacitor-printer": "^7.0.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.4.3",

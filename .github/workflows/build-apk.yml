@@ -1,4 +1,4 @@
-name: Build Moallem V2.4 APK
+name: Build Moallem V2.5 APK
 
 on:
   workflow_dispatch:
@@ -40,5 +40,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Moallem-V2.4-AI-APK
+          name: Moallem-V2.5-TAI-40-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
