@@ -1,8 +1,11 @@
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
+
+const VERSION = 'tai-39-workers-ai-1';
+const DEFAULT_MODEL = '@cf/meta/llama-3.1-8b-instruct';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -11,32 +14,54 @@ function json(data, status = 200) {
   });
 }
 
-function extractText(data) {
-  if (typeof data?.output_text === 'string' && data.output_text.trim()) return data.output_text.trim();
-  const parts = [];
-  for (const item of data?.output || []) {
-    for (const content of item?.content || []) {
-      if (content?.type === 'output_text' && typeof content?.text === 'string') parts.push(content.text);
-      else if (typeof content?.text === 'string') parts.push(content.text);
-    }
-  }
-  return parts.join('\n').trim();
+function extractWorkersAiText(data) {
+  if (typeof data === 'string' && data.trim()) return data.trim();
+  if (typeof data?.response === 'string' && data.response.trim()) return data.response.trim();
+  if (typeof data?.result?.response === 'string' && data.result.response.trim()) return data.result.response.trim();
+  if (typeof data?.text === 'string' && data.text.trim()) return data.text.trim();
+  return '';
 }
 
 export default {
   async fetch(request, env) {
-    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
-    if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: corsHeaders });
+    }
 
     const url = new URL(request.url);
+
+    if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
+      return json({
+        ok: true,
+        service: 'moallem-ai',
+        version: VERSION,
+        provider: 'cloudflare-workers-ai',
+        model: env.AI_MODEL || DEFAULT_MODEL,
+        ai_binding_configured: Boolean(env.AI),
+      });
+    }
+
+    if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
     if (url.pathname !== '/api/ai' && url.pathname !== '/') return json({ error: 'Not found' }, 404);
-    if (!env.OPENAI_API_KEY) return json({ error: 'الخادم غير مهيأ بعد: مفتاح خدمة الذكاء غير موجود.' }, 500);
+
+    if (!env.AI || typeof env.AI.run !== 'function') {
+      return json({
+        error: 'خدمة الذكاء غير مرتبطة بالخادم بعد.',
+        code: 'missing_workers_ai_binding',
+        version: VERSION,
+      }, 500);
+    }
 
     let body;
-    try { body = await request.json(); } catch { return json({ error: 'طلب غير صالح.' }, 400); }
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: 'طلب غير صالح.' }, 400);
+    }
 
     const prompt = String(body?.prompt || '').trim();
     const context = body?.context || {};
+
     if (!prompt) return json({ error: 'اكتب طلبًا أولًا.' }, 400);
     if (prompt.length > 6000) return json({ error: 'الطلب طويل جدًا.' }, 413);
 
@@ -44,34 +69,43 @@ export default {
     const section = String(context.section || 'غير محدد');
     const subject = String(context.subject || 'غير محدد');
 
-    const instructions = `أنت مساعد تربوي عربي لتطبيق «معلّم». ساعد المدرس بإجابات عملية ومنظمة ومناسبة للمدرسة.\nالصف: ${grade}\nالشعبة: ${section}\nالمادة: ${subject}\nاكتب بالعربية الواضحة. عند طلب تحضير درس، استخدم: الأهداف، التمهيد، الأفكار الأساسية، نشاط صفي، تقويم سريع، واجب/مراجعة. لا تخترع معلومات دراسية دقيقة إن لم تكن واثقًا؛ صرّح بذلك.`;
+    const systemPrompt = `أنت مساعد تربوي عربي داخل تطبيق «معلّم». ساعد المدرس بإجابات عملية ومنظمة ومناسبة للمدرسة.\nالصف: ${grade}\nالشعبة: ${section}\nالمادة: ${subject}\nاكتب بالعربية الواضحة. عند طلب تحضير درس استخدم: الأهداف، التمهيد، الأفكار الأساسية، نشاط صفي، تقويم سريع، واجب/مراجعة. إذا لم تكن واثقًا من معلومة منهجية دقيقة فاذكر ذلك بوضوح ولا تخترعها.`;
 
     try {
-      const apiResponse = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: env.OPENAI_MODEL || 'gpt-5.6-luna',
-          instructions,
-          input: prompt,
-          max_output_tokens: 1400,
-        }),
+      const model = env.AI_MODEL || DEFAULT_MODEL;
+      const result = await env.AI.run(model, {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt },
+        ],
+        max_tokens: 1400,
       });
 
-      const data = await apiResponse.json().catch(() => ({}));
-      if (!apiResponse.ok) {
-        const message = data?.error?.message || 'فشل خادم الذكاء في تنفيذ الطلب.';
-        return json({ error: message }, apiResponse.status >= 500 ? 502 : 400);
+      const text = extractWorkersAiText(result);
+      if (!text) {
+        return json({
+          error: 'لم تصل إجابة نصية صالحة من خدمة الذكاء.',
+          code: 'empty_ai_response',
+          provider: 'cloudflare-workers-ai',
+          model,
+          version: VERSION,
+        }, 502);
       }
 
-      const text = extractText(data);
-      if (!text) return json({ error: 'لم تصل إجابة نصية صالحة من خدمة الذكاء.' }, 502);
-      return json({ text });
+      return json({
+        text,
+        provider: 'cloudflare-workers-ai',
+        model,
+        version: VERSION,
+      });
     } catch (error) {
-      return json({ error: 'تعذر الاتصال بخدمة الذكاء حاليًا. حاول بعد قليل.' }, 502);
+      return json({
+        error: 'تعذر تنفيذ الطلب عبر خدمة الذكاء حاليًا.',
+        code: 'workers_ai_request_failed',
+        detail: String(error?.message || 'unknown_error').slice(0, 240),
+        provider: 'cloudflare-workers-ai',
+        version: VERSION,
+      }, 502);
     }
   },
 };
