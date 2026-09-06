@@ -5,6 +5,9 @@ import {Printer} from '@capgo/capacitor-printer';
 import {App as CapacitorApp} from '@capacitor/app';
 import './styles.css';
 import moallemIcon from './assets/moallem-icon.png';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+pdfjsLib.GlobalWorkerOptions.workerSrc=pdfWorker;
 
 const DEFAULT_GRADES=['السابع','الثامن','التاسع','العاشر','الحادي عشر','البكالوريا'];
 const DEFAULT_SECTIONS=['أ','ب'];
@@ -53,6 +56,114 @@ function App(){
  const [plannerEnd,setPlannerEnd]=useState('');
  const [plannerPeriods,setPlannerPeriods]=useState(3);
  const [plannerHolidays,setPlannerHolidays]=useState('');
+  const [bookStartPage,setBookStartPage]=useState(1);
+  const [bookEndPage,setBookEndPage]=useState(1);
+  const [bookLessonTitle,setBookLessonTitle]=useState('');
+
+  const prepareLessonFromBook=async()=>{
+    if(!plannerBook){
+      setLibraryMessage('اختر كتاباً أولاً.');
+      return;
+    }
+
+    setAiLoading(true);
+    setAiError('');
+    setLibraryMessage('جاري قراءة صفحات الكتاب...');
+
+    try{
+      const extracted=await extractPdfText(
+        plannerBook.id,
+        bookStartPage,
+        bookEndPage
+      );
+
+      if(!extracted?.text?.trim()){
+        throw new Error('لم يتم العثور على نص قابل للقراءة في الصفحات المحددة.');
+      }
+
+      const lessonName=bookLessonTitle.trim()||'الدرس المحدد';
+
+      const promptText=`أنت مساعد معلم للمنهاج السوري.
+اعتمد حصراً على نص الكتاب المرفق أدناه، ولا تضف معلومات أو دروس غير موجودة فيه.
+
+الصف: ${plannerBook.grade}
+المادة: ${plannerBook.subject}
+${plannerBook.branch?`الفرع: ${plannerBook.branch}`:''}
+اسم الكتاب: ${plannerBook.title}
+اسم الدرس: ${lessonName}
+الصفحات: ${extracted.startPage} إلى ${extracted.endPage}
+
+المطلوب:
+1. عنوان الدرس.
+2. الأهداف التعليمية.
+3. تمهيد مناسب.
+4. المفاهيم والمصطلحات الأساسية.
+5. شرح الدرس مرتباً ومناسباً للطلاب.
+6. توزيع مقترح للحصة أو الحصص.
+7. نشاط صفي.
+8. أسئلة تقويم أثناء الدرس.
+9. تقويم نهائي.
+10. واجب منزلي.
+11. ملاحظات للمعلم.
+
+نص الكتاب:
+----------------
+${extracted.text}
+----------------
+
+إذا كان جزء من المطلوب غير موجود أو غير واضح في الصفحات، اذكر ذلك صراحة ولا تخترع محتوى.`;
+
+      const endpoint=(import.meta.env.VITE_AI_API_URL||
+        'https://moallem-ai.liondangerous65.workers.dev/api/ai').trim();
+
+      const controller=new AbortController();
+      const timer=setTimeout(()=>controller.abort(),90000);
+
+      const response=await fetch(endpoint,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          prompt:promptText,
+          context:{
+            grade:plannerBook.grade,
+            section,
+            subject:plannerBook.subject
+          }
+        }),
+        signal:controller.signal
+      });
+
+      clearTimeout(timer);
+
+      const data=await response.json().catch(()=>({}));
+
+      if(!response.ok){
+        throw new Error(data?.error||`خطأ من الخادم (${response.status})`);
+      }
+
+      const text=data?.text||data?.answer||data?.result;
+
+      if(!text){
+        throw new Error('وصل رد من خدمة الذكاء بدون نص صالح.');
+      }
+
+      setAiResult(String(text));
+      setLibraryMessage(
+        `تم تحضير ${lessonName} من الصفحات ${extracted.startPage}-${extracted.endPage}.`
+      );
+      setTab('ai');
+
+    }catch(err){
+      const message=err?.name==='AbortError'
+        ?'انتهت مهلة الاتصال بالذكاء. حاول مجدداً.'
+        :(err?.message||'تعذر تحضير الدرس من الكتاب.');
+      setAiError(message);
+      setLibraryMessage(message);
+    }finally{
+      setAiLoading(false);
+    }
+  };
+
  const [savedPlans,setSavedPlans]=useState(()=>load('m2_curriculum_plans',[]));
  const pdfInputRef=useRef(null);
  const [reportPreview,setReportPreview]=useState(false);
@@ -168,10 +279,72 @@ function App(){
  {tab==='gradebook'&&<section className="panel"><div className="panelhead"><div><span className="eyebrow">دفتر العلامات</span><h2>{subject}</h2><p>{grade} — الشعبة {section}</p>{isGeneralScience&&<div className="science-scale">{GENERAL_SCIENCE_BRANCHES.map(b=><span key={b.id}>{b.name} <b>{b.max}</b></span>)}<strong>المجموع {GENERAL_SCIENCE_TOTAL}</strong></div>}</div><div className="actions"><button onClick={()=>setEditMode(v=>!v)}>{editMode?<Save size={17}/>:<Edit3 size={17}/>} {editMode?'حفظ':'تعديل'}</button><button className="primary" onClick={printGradebook}><PrinterIcon size={17}/> طباعة</button></div></div>{editMode&&<div className="column-tools"><button onClick={addColumn}><Plus size={16}/> إضافة عمود</button><span>اسم البند والعلامة العظمى قابلان للتعديل.</span></div>}<div className="tablewrap"><table className="gradebook"><thead><tr><th>#</th><th className="namecol">الطالب</th>{book.columns.map(c=><th key={c.id}>{editMode?<div className="coledit"><input value={c.name} onChange={e=>updateColumn(c.id,{name:e.target.value})}/><input type="number" value={c.max} onChange={e=>updateColumn(c.id,{max:Number(e.target.value)||0})}/><button onClick={()=>deleteColumn(c.id)}><Trash2 size={14}/></button></div>:<>{c.name}<small>/{c.max}</small></>}</th>)}<th>المجموع</th><th>النسبة</th></tr></thead><tbody>{classStudents.map((s,i)=>{const c=calc(s);return<tr key={s.id}><td>{i+1}</td><td className="namecol">{s.name}</td>{book.columns.map(col=><td key={col.id}><input className="mark" type="number" value={book.marks[s.id]?.[col.id]??''} onChange={e=>setMark(s.id,col.id,e.target.value)} placeholder="—"/></td>)}<td><b>{c.got}/{c.max}</b></td><td><b>{c.pct}%</b></td></tr>})}</tbody></table></div></section>}
  {tab==='attendance'&&<section className="panel"><div className="panelhead"><div><span className="eyebrow">الحضور والغياب</span><h2>{grade} — الشعبة {section}</h2></div></div><div className="studentlist">{classStudents.map((s,i)=>{const k=`${grade}|${section}|${s.id}`,st=attendance[k]||'present';return<div className="attrow" key={s.id}><span className="num">{i+1}</span><strong>{s.name}</strong><div className="seg">{['present','absent','late'].map(v=><button key={v} className={st===v?'active':''} onClick={()=>setAtt(s.id,v)}>{v==='present'?'حاضر':v==='absent'?'غائب':'متأخر'}</button>)}</div></div>})}</div></section>}
  {tab==='reports'&&<section className="panel"><div className="panelhead"><div><span className="eyebrow">التقارير والجلاء</span><h2>جاهز للطباعة</h2></div></div><div className="reportcards"><button className="reportcard" onClick={printGradebook}><TableProperties/><strong>دفتر العلامات</strong><span>أسماء الطلاب + البنود + المجاميع والنسب</span><PrinterIcon/></button><button className="reportcard" onClick={()=>setReportPreview(true)}><GraduationCap/><strong>جلاء مدرسي</strong><span>معاينة الجلاء قبل الطباعة</span><ChevronLeft/></button></div><p className="note">قالب الجلاء الحالي تجريبي، وسيتم توسيعه ليجمع عدة مواد وفترات في صفحة واحدة.</p></section>}
- {tab==='library'&&<section className="panel library-panel"><div className="panelhead"><div><span className="eyebrow">مكتبتي</span><h2>كتبك وموادك في مكان واحد</h2><p>أضف كتب PDF واربط كل كتاب بالصف والمادة والفرع الصحيح.</p>{isGeneralScience&&<div className="science-scale">{GENERAL_SCIENCE_BRANCHES.map(b=><span key={b.id}>{b.name} <b>{b.max}</b></span>)}<strong>العلوم العامة {GENERAL_SCIENCE_TOTAL}</strong></div>}</div></div><div className="library-add"><div className="library-fields"><input value={libraryTitle} onChange={e=>setLibraryTitle(e.target.value)} placeholder="اسم الكتاب (اختياري)"/><select value={grade} onChange={e=>setGrade(e.target.value)}>{grades.map(g=><option key={g}>{g}</option>)}</select><select value={subject} onChange={e=>setSubject(e.target.value)}>{subjects.map(s=><option key={s}>{s}</option>)}</select></div><input ref={pdfInputRef} className="hidden-file" type="file" accept="application/pdf,.pdf" onChange={e=>{const f=e.target.files?.[0];addLibraryPdf(f);e.target.value=''}}/><button className="primary library-upload" onClick={()=>pdfInputRef.current?.click()}><Upload size={18}/> إضافة كتاب PDF</button></div>{libraryMessage&&<div className="note">{libraryMessage}</div>}<div className="library-list">{libraryBooks.length?libraryBooks.map(b=><article className="library-book" key={b.id}><div className="library-cover"><BookOpen size={24}/></div><div className="library-info"><span>PDF · {b.grade} · {b.subject}{b.branch?` · ${b.branch}`:''}</span><h3>{b.title}</h3><small>{b.fileName} · {Math.max(1,Math.round((b.size||0)/1024/1024*10)/10)} MB</small></div><div className="library-actions"><button onClick={()=>openLibraryBook(b)}><FolderOpen size={16}/> فتح</button><button onClick={()=>editLibraryBook(b)}><Edit3 size={16}/> تعديل</button><button onClick={()=>{setPlannerBook(b);setLibraryMessage('')}}><CalendarDays size={16}/> التخطيط</button><button className="danger" onClick={()=>removeLibraryBook(b)}><Trash2 size={16}/></button></div></article>):<div className="empty-state"><Library size={28}/><strong>مكتبتك فارغة</strong><span>أضف أول كتاب PDF للبدء.</span></div>}</div>{plannerBook&&<div className="planner-box"><div className="panelhead"><div><span className="eyebrow">التخطيط الذكي</span><h3>{plannerBook.title}</h3><p>{plannerBook.grade} · {plannerBook.subject}{plannerBook.branch?` · ${plannerBook.branch}`:''}</p></div><button onClick={()=>setPlannerBook(null)}>إغلاق</button></div><div className="planner-fields"><label>بداية الفصل<input type="date" value={plannerStart} onChange={e=>setPlannerStart(e.target.value)}/></label><label>نهاية الفصل<input type="date" value={plannerEnd} onChange={e=>setPlannerEnd(e.target.value)}/></label><label>الحصص أسبوعياً<input type="number" min="1" max="12" value={plannerPeriods} onChange={e=>setPlannerPeriods(e.target.value)}/></label><label>العطل والتوقفات<textarea value={plannerHolidays} onChange={e=>setPlannerHolidays(e.target.value)} placeholder="مثال: عطلة من 10/10 إلى 12/10"/></label></div><div className="plan-levels"><span>فصلية</span><ChevronLeft/><span>شهرية</span><ChevronLeft/><span>أسبوعية</span><ChevronLeft/><span>تحضير الدرس</span></div><button className="primary wide" onClick={savePlannerSettings}><Save size={17}/> حفظ إعدادات التخطيط</button><p className="note">حماية من الهلوسة: لن يُنشئ التطبيق أسماء وحدات أو دروس من عنده. إنشاء الخطة يتفعّل بعد استخراج فهرس وصفحات هذا الـPDF فعلياً.</p></div>}<p className="note">الكتب تُحفظ محليًا على هذا الجهاز. التخطيط مرتبط بكل كتاب على حدة ويحافظ على الصف والمادة والفرع.</p></section>}
+ {tab==='library'&&<section className="panel library-panel"><div className="panelhead"><div><span className="eyebrow">مكتبتي</span><h2>كتبك وموادك في مكان واحد</h2><p>أضف كتب PDF واربط كل كتاب بالصف والمادة والفرع الصحيح.</p>{isGeneralScience&&<div className="science-scale">{GENERAL_SCIENCE_BRANCHES.map(b=><span key={b.id}>{b.name} <b>{b.max}</b></span>)}<strong>العلوم العامة {GENERAL_SCIENCE_TOTAL}</strong></div>}</div></div><div className="library-add"><div className="library-fields"><input value={libraryTitle} onChange={e=>setLibraryTitle(e.target.value)} placeholder="اسم الكتاب (اختياري)"/><select value={grade} onChange={e=>setGrade(e.target.value)}>{grades.map(g=><option key={g}>{g}</option>)}</select><select value={subject} onChange={e=>setSubject(e.target.value)}>{subjects.map(s=><option key={s}>{s}</option>)}</select></div><input ref={pdfInputRef} className="hidden-file" type="file" accept="application/pdf,.pdf" onChange={e=>{const f=e.target.files?.[0];addLibraryPdf(f);e.target.value=''}}/><button className="primary library-upload" onClick={()=>pdfInputRef.current?.click()}><Upload size={18}/> إضافة كتاب PDF</button></div>{libraryMessage&&<div className="note">{libraryMessage}</div>}<div className="library-list">{libraryBooks.length?libraryBooks.map(b=><article className="library-book" key={b.id}><div className="library-cover"><BookOpen size={24}/></div><div className="library-info"><span>PDF · {b.grade} · {b.subject}{b.branch?` · ${b.branch}`:''}</span><h3>{b.title}</h3><small>{b.fileName} · {Math.max(1,Math.round((b.size||0)/1024/1024*10)/10)} MB</small></div><div className="library-actions"><button onClick={()=>openLibraryBook(b)}><FolderOpen size={16}/> فتح</button><button onClick={()=>editLibraryBook(b)}><Edit3 size={16}/> تعديل</button><button onClick={()=>{setPlannerBook(b);setLibraryMessage('')}}><CalendarDays size={16}/> التخطيط</button><button className="danger" onClick={()=>removeLibraryBook(b)}><Trash2 size={16}/></button></div></article>):<div className="empty-state"><Library size={28}/><strong>مكتبتك فارغة</strong><span>أضف أول كتاب PDF للبدء.</span></div>}</div>{plannerBook&&<div className="planner-box"><div className="panelhead"><div><span className="eyebrow">التخطيط الذكي</span><h3>{plannerBook.title}</h3><p>{plannerBook.grade} · {plannerBook.subject}{plannerBook.branch?` · ${plannerBook.branch}`:''}</p></div><button onClick={()=>setPlannerBook(null)}>إغلاق</button></div><div className="planner-fields"><label>بداية الفصل<input type="date" value={plannerStart} onChange={e=>setPlannerStart(e.target.value)}/></label><label>نهاية الفصل<input type="date" value={plannerEnd} onChange={e=>setPlannerEnd(e.target.value)}/></label><label>الحصص أسبوعياً<input type="number" min="1" max="12" value={plannerPeriods} onChange={e=>setPlannerPeriods(e.target.value)}/></label><label>العطل والتوقفات<textarea value={plannerHolidays} onChange={e=>setPlannerHolidays(e.target.value)} placeholder="مثال: عطلة من 10/10 إلى 12/10"/></label></div><div className="planner-fields">
+      <label>اسم الدرس
+        <input
+          value={bookLessonTitle}
+          onChange={e=>setBookLessonTitle(e.target.value)}
+          placeholder="مثال: الحركة والسكون"
+        />
+      </label>
+
+      <label>من صفحة
+        <input
+          type="number"
+          min="1"
+          value={bookStartPage}
+          onChange={e=>setBookStartPage(e.target.value)}
+        />
+      </label>
+
+      <label>إلى صفحة
+        <input
+          type="number"
+          min="1"
+          value={bookEndPage}
+          onChange={e=>setBookEndPage(e.target.value)}
+        />
+      </label>
+
+      <button
+        className="primary wide"
+        onClick={prepareLessonFromBook}
+        disabled={aiLoading}
+      >
+        <Sparkles size={17}/>
+        {aiLoading?'جاري التحضير...':'تحضير من الكتاب'}
+      </button>
+    </div>
+    <p className="note">
+      يعتمد التحضير على نص الصفحات المحددة من ملف PDF المحفوظ في مكتبتك.
+    </p>
+    <div className="plan-levels"><span>فصلية</span><ChevronLeft/><span>شهرية</span><ChevronLeft/><span>أسبوعية</span><ChevronLeft/><span>تحضير الدرس</span></div><button className="primary wide" onClick={savePlannerSettings}><Save size={17}/> حفظ إعدادات التخطيط</button><p className="note">حماية من الهلوسة: لن يُنشئ التطبيق أسماء وحدات أو دروس من عنده. إنشاء الخطة يتفعّل بعد استخراج فهرس وصفحات هذا الـPDF فعلياً.</p></div>}<p className="note">الكتب تُحفظ محليًا على هذا الجهاز. التخطيط مرتبط بكل كتاب على حدة ويحافظ على الصف والمادة والفرع.</p></section>}
 {tab==='ai'&&<section className="panel"><div className="panelhead"><div><span className="eyebrow">المساعد الذكي</span><h2>{online?'المساعد الذكي متصل':'المساعدة بدون إنترنت'}</h2></div></div><textarea className="prompt" value={aiPrompt} onChange={e=>setAiPrompt(e.target.value)} placeholder="مثال: حضّر لي درساً عن الجهاز التنفسي..."/><button className="primary wide" onClick={aiRun} disabled={aiLoading}>{aiLoading?'جارٍ التحضير...':<><Sparkles size={17}/> تنفيذ</>}</button>{aiError&&<div className="note" role="alert">{aiError}</div>}{aiResult&&<pre className="airesult">{aiResult}</pre>}<div className="note">{online?'يتم إرسال طلب الدرس فقط إلى خادم آمن؛ مفتاح الخدمة لا يُخزّن داخل التطبيق.':'يمكنك استخدام الخطة المحلية، وتعود الإجابات الذكية عند توفر الإنترنت.'}</div></section>}
  {tab==='settings'&&<section className="panel"><div className="panelhead"><div><span className="eyebrow">التخصيص</span><h2>كل بند قابل للتعديل</h2></div></div><Config title="الصفوف" items={grades} kind="الصف" add={()=>addItem('الصف')} rename={renameItem} remove={removeItem}/><Config title="الشُعب" items={sections} kind="الشعبة" add={()=>addItem('الشعبة')} rename={renameItem} remove={removeItem}/><Config title="المواد" items={subjects} kind="المادة" add={()=>addItem('المادة')} rename={renameItem} remove={removeItem}/></section>}</>}</main>
  {!reportPreview&&<nav className="nav"><button className={tab==='home'?'active':''} onClick={()=>setTab('home')}><Home/><span>الرئيسية</span></button><button className={tab==='students'?'active':''} onClick={()=>setTab('students')}><Users/><span>الطلاب</span></button><button className={tab==='gradebook'?'active':''} onClick={()=>setTab('gradebook')}><TableProperties/><span>العلامات</span></button><button className={tab==='ai'?'active':''} onClick={()=>setTab('ai')}><Bot/><span>الذكاء</span></button><button className={tab==='settings'?'active':''} onClick={()=>setTab('settings')}><Settings/><span>تعديل</span></button></nav>}</div>}
 function Tile({icon,title,text,onClick,tone='blue'}){return<button className={`tile ${tone}`} onClick={onClick}><span className="tileicon">{icon}</span><strong>{title}</strong><small>{text}</small><ChevronLeft className="tilearrow"/></button>}
 function Config({title,items,kind,add,rename,remove}){return<div className="config"><div className="confighead"><h3>{title}</h3><button onClick={add}><Plus size={16}/> إضافة</button></div><div className="chips">{items.map(x=><div className="chip" key={x}><span>{x}</span><button onClick={()=>rename(kind,x)}><Edit3 size={14}/></button><button onClick={()=>remove(kind,x)}><Trash2 size={14}/></button></div>)}</div></div>}
 createRoot(document.getElementById('root')).render(<App/>);
+
+const extractPdfText=async(bookId,startPage=1,endPage=startPage)=>{
+  const blob=await getPdfBlob(bookId);
+  if(!blob) throw new Error('لم يتم العثور على ملف الكتاب');
+  const data=new Uint8Array(await blob.arrayBuffer());
+  const pdf=await pdfjsLib.getDocument({data}).promise;
+  const from=Math.max(1,Number(startPage)||1);
+  const to=Math.min(pdf.numPages,Math.max(from,Number(endPage)||from));
+  const pages=[];
+  for(let pageNumber=from;pageNumber<=to;pageNumber++){
+    const page=await pdf.getPage(pageNumber);
+    const content=await page.getTextContent();
+    const text=content.items.map(item=>item.str||'').join(' ').replace(/\s+/g,' ').trim();
+    pages.push(`الصفحة ${pageNumber}\n${text}`);
+  }
+  return {
+    pageCount:pdf.numPages,
+    startPage:from,
+    endPage:to,
+    text:pages.join('\n\n')
+  };
+};
+
