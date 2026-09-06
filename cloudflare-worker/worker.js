@@ -1,135 +1,231 @@
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
 };
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', ...corsHeaders },
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      ...corsHeaders,
+    },
   });
 }
 
-function extractText(data) {
-  if (typeof data?.output_text === 'string' && data.output_text.trim()) {
-    return data.output_text.trim();
-  }
-  const parts = [];
-  for (const item of data?.output || []) {
-    for (const content of item?.content || []) {
-      if (typeof content?.text === 'string' && content.text.trim()) parts.push(content.text.trim());
-    }
-  }
-  return parts.join('\n').trim();
-}
+function extractText(result) {
+  if (!result) return "";
 
-function safeUpstreamError(data, status) {
-  return {
-    error: data?.error?.message || 'فشل خادم الذكاء في تنفيذ الطلب.',
-    code: data?.error?.code || null,
-    type: data?.error?.type || null,
-    upstream_status: status,
-  };
+  const choiceText = result?.choices?.[0]?.message?.content;
+
+  if (typeof choiceText === "string" && choiceText.trim()) {
+    return choiceText.trim();
+  }
+
+  if (Array.isArray(choiceText)) {
+    const joined = choiceText
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (typeof item?.text === "string") return item.text;
+        if (typeof item?.content === "string") return item.content;
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+
+    if (joined) return joined;
+  }
+
+  if (typeof result.response === "string" && result.response.trim()) {
+    return result.response.trim();
+  }
+
+  if (typeof result.text === "string" && result.text.trim()) {
+    return result.text.trim();
+  }
+
+  if (typeof result.output_text === "string" && result.output_text.trim()) {
+    return result.output_text.trim();
+  }
+
+  return "";
 }
 
 export default {
   async fetch(request, env) {
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders });
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders,
+      });
     }
 
     const url = new URL(request.url);
 
-    if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
+    if (
+      request.method === "GET" &&
+      (url.pathname === "/" || url.pathname === "/health")
+    ) {
       return json({
         ok: true,
-        service: 'moallem-ai',
-        version: 'tai-39-fix-1',
-        model: env.OPENAI_MODEL || 'gpt-5.6-luna',
-        api_key_configured: Boolean(env.OPENAI_API_KEY),
+        service: "moallem-ai",
+        version: "tai-39-workers-ai-2",
+        provider: "cloudflare-workers-ai",
+        model: "@cf/zai-org/glm-4.7-flash",
+        ai_binding_configured: Boolean(env.AI),
       });
     }
 
-    if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
-    if (url.pathname !== '/api/ai' && url.pathname !== '/') return json({ error: 'Not found' }, 404);
-    if (!env.OPENAI_API_KEY) {
-      return json({ error: 'الخادم غير مهيأ بعد: مفتاح خدمة الذكاء غير موجود.', code: 'missing_api_key' }, 500);
+    if (request.method !== "POST") {
+      return json(
+        {
+          error: "Method not allowed",
+          code: "method_not_allowed",
+        },
+        405
+      );
+    }
+
+    if (url.pathname !== "/api/ai" && url.pathname !== "/") {
+      return json(
+        {
+          error: "Not found",
+          code: "not_found",
+        },
+        404
+      );
+    }
+
+    if (!env.AI) {
+      return json(
+        {
+          error: "خدمة Workers AI غير مربوطة بالخادم.",
+          code: "missing_ai_binding",
+        },
+        500
+      );
     }
 
     let body;
+
     try {
       body = await request.json();
     } catch {
-      return json({ error: 'طلب غير صالح.' }, 400);
+      return json(
+        {
+          error: "الطلب غير صالح.",
+          code: "invalid_json",
+        },
+        400
+      );
     }
 
-    const prompt = String(body?.prompt || '').trim();
+    const prompt = String(body?.prompt || "").trim();
     const context = body?.context || {};
-    if (!prompt) return json({ error: 'اكتب طلبًا أولًا.' }, 400);
-    if (prompt.length > 6000) return json({ error: 'الطلب طويل جدًا.' }, 413);
 
-    const grade = String(context.grade || 'غير محدد');
-    const section = String(context.section || 'غير محدد');
-    const subject = String(context.subject || 'غير محدد');
+    if (!prompt) {
+      return json(
+        {
+          error: "اكتب طلبًا أولًا.",
+          code: "missing_prompt",
+        },
+        400
+      );
+    }
 
-    const instructions = `أنت مساعد تربوي عربي لتطبيق «معلّم». ساعد المدرس بإجابات عملية ومنظمة ومناسبة للمدرسة.\nالصف: ${grade}\nالشعبة: ${section}\nالمادة: ${subject}\nاكتب بالعربية الواضحة. عند طلب تحضير درس، استخدم: الأهداف، التمهيد، الأفكار الأساسية، نشاط صفي، تقويم سريع، واجب/مراجعة. لا تخترع معلومات دراسية دقيقة إن لم تكن واثقًا؛ صرّح بذلك.`;
+    if (prompt.length > 12000) {
+      return json(
+        {
+          error: "الطلب طويل جدًا.",
+          code: "prompt_too_long",
+        },
+        413
+      );
+    }
+
+    const grade = String(context.grade || "غير محدد");
+    const section = String(context.section || "غير محدد");
+    const subject = String(context.subject || "غير محدد");
+
+    const systemPrompt = `
+أنت المساعد الذكي داخل تطبيق «معلّم»، وهو تطبيق عربي مخصص للمدرسين.
+
+السياق الحالي:
+الصف: ${grade}
+الشعبة: ${section}
+المادة: ${subject}
+
+قواعد الإجابة:
+- أجب باللغة العربية الواضحة والسليمة.
+- اجعل الإجابة عملية ومباشرة ومناسبة للمدرس.
+- راعِ الصف والمادة المحددين.
+- لا تدّعِ أنك قرأت كتابًا أو ملف PDF ما لم يُرسل محتواه فعلًا.
+- إذا لم تكن المعلومات كافية، وضّح ذلك ولا تخترع معلومات.
+
+إذا طلب المدرس تحضير درس، استخدم هذا الترتيب:
+1. عنوان الدرس
+2. الأهداف التعليمية
+3. التمهيد
+4. المفاهيم الأساسية
+5. شرح وسير الدرس
+6. نشاط صفي
+7. أسئلة تقويم
+8. واجب منزلي
+9. ملخص سريع للمدرس
+`.trim();
 
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 45000);
+      const result = await env.AI.run(
+        "@cf/zai-org/glm-4.7-flash",
+        {
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt,
+            },
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+          max_completion_tokens: 1400,
+        }
+      );
 
-      let apiResponse;
-      try {
-        apiResponse = await fetch('https://api.openai.com/v1/responses', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: env.OPENAI_MODEL || 'gpt-5.6-luna',
-            instructions,
-            input: prompt,
-            reasoning: { effort: 'none' },
-            max_output_tokens: 1400,
-          }),
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timeout);
-      }
+      const text = extractText(result);
 
-      const raw = await apiResponse.text();
-      let data = {};
-      try {
-        data = raw ? JSON.parse(raw) : {};
-      } catch {
-        data = {};
-      }
-
-      if (!apiResponse.ok) {
-        const payload = safeUpstreamError(data, apiResponse.status);
-        return json(payload, apiResponse.status >= 500 ? 502 : apiResponse.status);
-      }
-
-      const text = extractText(data);
       if (!text) {
-        return json({
-          error: 'لم تصل إجابة نصية صالحة من خدمة الذكاء.',
-          code: 'empty_ai_response',
-          upstream_status: apiResponse.status,
-        }, 502);
+        return json(
+          {
+            error: "وصل رد من خدمة الذكاء لكن بدون نص صالح.",
+            code: "empty_ai_response",
+            result_keys:
+              result && typeof result === "object"
+                ? Object.keys(result)
+                : [],
+          },
+          502
+        );
       }
 
-      return json({ text });
-    } catch (error) {
       return json({
-        error: error?.name === 'AbortError'
-          ? 'انتهت مهلة الاتصال بخدمة الذكاء. حاول مرة أخرى.'
-          : 'تعذر الاتصال بخدمة الذكاء حاليًا. حاول بعد قليل.',
-        code: error?.name === 'AbortError' ? 'upstream_timeout' : 'upstream_network_error',
-      }, 502);
+        text,
+        provider: "cloudflare-workers-ai",
+        model: "@cf/zai-org/glm-4.7-flash",
+      });
+    } catch (error) {
+      return json(
+        {
+          error: "تعذر تنفيذ الطلب عبر Workers AI.",
+          code: "workers_ai_error",
+          message: String(
+            error?.message || error || "Unknown error"
+          ),
+        },
+        502
+      );
     }
   },
 };
