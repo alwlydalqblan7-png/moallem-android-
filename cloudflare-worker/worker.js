@@ -190,7 +190,7 @@ export default {
               content: prompt,
             },
           ],
-          max_completion_tokens: 1400,
+          max_completion_tokens: 3200,
         }
       );
 
