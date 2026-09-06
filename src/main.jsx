@@ -137,7 +137,7 @@ function App(){
   setAiLoading(true); setAiResult('');
   try{
    const endpoint=(import.meta.env.VITE_AI_API_URL||'https://moallem-ai.liondangerous65.workers.dev/api/ai').trim();
-   const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),30000);
+   const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),90000);
    const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:promptText,context:{grade,section,subject}}),signal:controller.signal}); clearTimeout(timer);
    const data=await response.json().catch(()=>({}));
    if(!response.ok)throw new Error(data?.error||`تعذر تنفيذ الطلب (${response.status})`);
