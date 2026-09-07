@@ -1,6 +1,6 @@
 {
   "name": "moallem-v2",
-  "version": "2.5.1",
+  "version": "2.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,19 +12,19 @@
     "android:open": "npx cap open android"
   },
   "dependencies": {
-    "@capacitor/android": "^7.4.3",
-    "@capacitor/app": "^7.0.0",
-    "@capacitor/core": "^7.4.3",
-    "@capgo/capacitor-printer": "^7.0.0",
     "@vitejs/plugin-react": "latest",
-    "lucide-react": "latest",
-    "pdfjs-dist": "^6.3.289",
+    "vite": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "vite": "latest"
+    "lucide-react": "latest",
+    "@capacitor/core": "^7.4.3",
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/app": "^7.0.0",
+    "@capgo/capacitor-printer": "^7.0.0",
+    "pdfjs-dist": "latest"
   },
   "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
-    "@capacitor/cli": "^7.4.3"
+    "@capacitor/cli": "^7.4.3",
+    "@capacitor/assets": "^3.0.5"
   }
 }
