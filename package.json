@@ -1,6 +1,6 @@
 {
   "name": "moallem-v2",
-  "version": "2.6.0",
+  "version": "2.5.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,11 +17,11 @@
     "react": "latest",
     "react-dom": "latest",
     "lucide-react": "latest",
+    "pdfjs-dist": "^4.10.38",
     "@capacitor/core": "^7.4.3",
     "@capacitor/android": "^7.4.3",
     "@capacitor/app": "^7.0.0",
-    "@capgo/capacitor-printer": "^7.0.0",
-    "pdfjs-dist": "latest"
+    "@capgo/capacitor-printer": "^7.0.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.4.3",

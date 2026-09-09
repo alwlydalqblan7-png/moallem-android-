@@ -71,7 +71,7 @@ export default {
       return json({
         ok: true,
         service: "moallem-ai",
-        version: "tai-39-workers-ai-2",
+        version: "tai-42-pdf-grounding-1",
         provider: "cloudflare-workers-ai",
         model: "@cf/zai-org/glm-4.7-flash",
         ai_binding_configured: Boolean(env.AI),
@@ -123,6 +123,7 @@ export default {
     }
 
     const prompt = String(body?.prompt || "").trim();
+    const referenceText = String(body?.referenceText || "").trim();
     const context = body?.context || {};
 
     if (!prompt) {
@@ -135,7 +136,7 @@ export default {
       );
     }
 
-    if (prompt.length > 12000) {
+    if (prompt.length > 12000 || referenceText.length > 50000) {
       return json(
         {
           error: "الطلب طويل جدًا.",
@@ -148,6 +149,14 @@ export default {
     const grade = String(context.grade || "غير محدد");
     const section = String(context.section || "غير محدد");
     const subject = String(context.subject || "غير محدد");
+    const bookTitle = String(context.bookTitle || "غير محدد");
+    const lessonTitle = String(context.lessonTitle || "غير محدد");
+    const pageStart = String(context.pageStart || "غير محدد");
+    const pageEnd = String(context.pageEnd || "غير محدد");
+
+    if (context.task === "lesson_preparation" && !referenceText) {
+      return json({error:"لم يصل نص الصفحات المرجعية من الكتاب.",code:"missing_reference_text"},400);
+    }
 
     const systemPrompt = `
 أنت المساعد الذكي داخل تطبيق «معلّم»، وهو تطبيق عربي مخصص للمدرسين.
@@ -156,12 +165,16 @@ export default {
 الصف: ${grade}
 الشعبة: ${section}
 المادة: ${subject}
+الكتاب: ${bookTitle}
+الدرس: ${lessonTitle}
+الصفحات: ${pageStart} إلى ${pageEnd}
 
 قواعد الإجابة:
 - أجب باللغة العربية الواضحة والسليمة.
 - اجعل الإجابة عملية ومباشرة ومناسبة للمدرس.
 - راعِ الصف والمادة المحددين.
-- لا تدّعِ أنك قرأت كتابًا أو ملف PDF ما لم يُرسل محتواه فعلًا.
+- عندما يوجد نص مرجعي، التزم به وحده ولا تضف حقائق تعليمية من خارج الصفحات.
+- إذا كان النص لا يكفي لتغطية بند، اكتب «غير واضح في الصفحات المحددة» بدل اختراع الإجابة.
 - إذا لم تكن المعلومات كافية، وضّح ذلك ولا تخترع معلومات.
 
 إذا طلب المدرس تحضير درس، استخدم هذا الترتيب:
@@ -177,6 +190,9 @@ export default {
 `.trim();
 
     try {
+      const groundedPrompt = referenceText
+        ? `${prompt}\n\nالنص المرجعي المستخرج من الكتاب:\n---\n${referenceText}\n---`
+        : prompt;
       const result = await env.AI.run(
         "@cf/zai-org/glm-4.7-flash",
         {
@@ -187,10 +203,10 @@ export default {
             },
             {
               role: "user",
-              content: prompt,
+              content: groundedPrompt,
             },
           ],
-          max_completion_tokens: 3200,
+          max_completion_tokens: 1400,
         }
       );
 
