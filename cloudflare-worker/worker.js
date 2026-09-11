@@ -71,7 +71,7 @@ export default {
       return json({
         ok: true,
         service: "moallem-ai",
-        version: "tai-42-full-lesson-3200",
+        version: "tai-42-science-subjects-2026-2027",
         provider: "cloudflare-workers-ai",
         model: "@cf/zai-org/glm-4.7-flash",
         ai_binding_configured: Boolean(env.AI),
@@ -84,7 +84,7 @@ export default {
           error: "Method not allowed",
           code: "method_not_allowed",
         },
-        405
+        405,
       );
     }
 
@@ -94,7 +94,7 @@ export default {
           error: "Not found",
           code: "not_found",
         },
-        404
+        404,
       );
     }
 
@@ -104,7 +104,7 @@ export default {
           error: "خدمة Workers AI غير مربوطة بالخادم.",
           code: "missing_ai_binding",
         },
-        500
+        500,
       );
     }
 
@@ -118,11 +118,12 @@ export default {
           error: "الطلب غير صالح.",
           code: "invalid_json",
         },
-        400
+        400,
       );
     }
 
     const prompt = String(body?.prompt || "").trim();
+    const referenceText = String(body?.referenceText || "").trim();
     const context = body?.context || {};
 
     if (!prompt) {
@@ -131,23 +132,38 @@ export default {
           error: "اكتب طلبًا أولًا.",
           code: "missing_prompt",
         },
-        400
+        400,
       );
     }
 
-    if (prompt.length > 24000) {
+    if (prompt.length > 12000 || referenceText.length > 50000) {
       return json(
         {
           error: "الطلب طويل جدًا.",
           code: "prompt_too_long",
         },
-        413
+        413,
       );
     }
 
     const grade = String(context.grade || "غير محدد");
     const section = String(context.section || "غير محدد");
     const subject = String(context.subject || "غير محدد");
+    const bookTitle = String(context.bookTitle || "غير محدد");
+    const lessonTitle = String(context.lessonTitle || "غير محدد");
+    const pageStart = String(context.pageStart || "غير محدد");
+    const pageEnd = String(context.pageEnd || "غير محدد");
+    const lessonDate = String(context.lessonDate || "غير محدد");
+
+    if (context.task === "lesson_preparation" && !referenceText) {
+      return json(
+        {
+          error: "لم يصل نص الصفحات المرجعية من الكتاب.",
+          code: "missing_reference_text",
+        },
+        400,
+      );
+    }
 
     const systemPrompt = `
 أنت المساعد الذكي داخل تطبيق «معلّم»، وهو تطبيق عربي مخصص للمدرسين في المنهاج السوري.
@@ -156,6 +172,10 @@ export default {
 الصف: ${grade}
 الشعبة: ${section}
 المادة: ${subject}
+الكتاب: ${bookTitle}
+الدرس/الوحدة: ${lessonTitle}
+الصفحات: ${pageStart} إلى ${pageEnd}
+التاريخ: ${lessonDate}
 
 قواعد الإجابة:
 - أجب بالعربية الواضحة والسليمة.
@@ -167,46 +187,32 @@ export default {
 - أكمل المهمة حتى النهاية ولا تتوقف بعد الأهداف.
 - لا تستخدم عناوين إنكليزية إلا إذا كانت موجودة أصلًا في النص المرسل.
 
-عند طلب تحضير درس، يجب أن تحتوي الإجابة كاملة على الأقسام الآتية:
-1. بيانات الدرس.
-2. عنوان الدرس.
-3. الأهداف التعليمية.
-4. الوسائل والأدوات.
-5. التمهيد.
-6. المفاهيم والمصطلحات الأساسية.
-7. شرح وسير الدرس خطوة بخطوة.
-8. توزيع الحصة أو الحصص.
-9. نشاط صفي أو تطبيقي.
-10. أسئلة الدرس — قسم إلزامي:
-   - 5 أسئلة شفهية مباشرة مع الإجابات النموذجية.
-   - 5 أسئلة اختيار من متعدد، 4 خيارات لكل سؤال، مع تحديد الإجابة الصحيحة.
-   - 3 أسئلة صح أو خطأ مع تصحيح العبارة الخاطئة.
-   - 3 أسئلة تفكير وفهم واستنتاج مع الإجابات النموذجية.
-11. التقويم النهائي مع الإجابات النموذجية.
-12. الواجب المنزلي.
-13. ملاحظات للمعلم.
-14. ملخص سريع للدرس.
+عند طلب تحضير درس التزم بنموذج 2026–2027: المعلومات العامة، نواتج قابلة للقياس، التمهيد والمفاهيم، الاستراتيجيات والأنشطة، سير الدرس ودور المعلم والمتعلم، الوسائل، تجربة أو نشاط آمن إن دعمه النص، التقويم المرحلي، التقويم النهائي المستقل، الواجب، الملاحظات، وملخص المدرس.
 
-يجب عدم حذف قسم الأسئلة أو الإجابات النموذجية حتى لو كانت الإجابة طويلة.
+قواعد ملزمة:
+- تعامل مع «علم الأحياء والأرض» و«الفيزياء» و«الكيمياء» كمواد تحضير مستقلة ولا تخلط بينها، حتى لو جُمعت علاماتها في الجلاء تحت «العلوم العامة».
+- افصل التقويم المرحلي عن التقويم النهائي.
+- صغ الأهداف بأفعال قابلة للملاحظة والقياس.
+- لا تضف تجربة أو معلومة لا يدعمها نص الصفحات المحددة.
 `.trim();
 
     try {
-      const result = await env.AI.run(
-        "@cf/zai-org/glm-4.7-flash",
-        {
-          messages: [
-            {
-              role: "system",
-              content: systemPrompt,
-            },
-            {
-              role: "user",
-              content: prompt,
-            },
-          ],
-          max_completion_tokens: 3200,
-        }
-      );
+      const groundedPrompt = referenceText
+        ? `${prompt}\n\nالنص المرجعي المستخرج من الكتاب:\n---\n${referenceText}\n---`
+        : prompt;
+      const result = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt,
+          },
+          {
+            role: "user",
+            content: groundedPrompt,
+          },
+        ],
+        max_completion_tokens: 3200,
+      });
 
       const text = extractText(result);
 
@@ -216,11 +222,9 @@ export default {
             error: "وصل رد من خدمة الذكاء لكن بدون نص صالح.",
             code: "empty_ai_response",
             result_keys:
-              result && typeof result === "object"
-                ? Object.keys(result)
-                : [],
+              result && typeof result === "object" ? Object.keys(result) : [],
           },
-          502
+          502,
         );
       }
 
@@ -234,11 +238,9 @@ export default {
         {
           error: "تعذر تنفيذ الطلب عبر Workers AI.",
           code: "workers_ai_error",
-          message: String(
-            error?.message || error || "Unknown error"
-          ),
+          message: String(error?.message || error || "Unknown error"),
         },
-        502
+        502,
       );
     }
   },
