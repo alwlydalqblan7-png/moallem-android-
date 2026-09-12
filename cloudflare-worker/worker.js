@@ -50,7 +50,19 @@ function extractText(result) {
     return result.output_text.trim();
   }
 
+  // Cloudflare model responses may also nest text under response/result/output.
+  for (const key of ["result", "output", "data"]) {
+    if (result?.[key] && typeof result[key] === "object") {
+      const nested = extractText(result[key]);
+      if (nested) return nested;
+    }
+  }
   return "";
+}
+
+function isPlaceholderText(text) {
+  const normalized = String(text || "").trim().replace(/[.!؟]/g, "");
+  return !normalized || normalized === "رد بلا نص" || normalized === "لا يوجد نص" || normalized === "empty response";
 }
 
 export default {
@@ -71,7 +83,7 @@ export default {
       return json({
         ok: true,
         service: "moallem-ai",
-        version: "tai-42-science-subjects-2026-2027",
+        version: "tai-42-book-grounded-v2.6.4",
         provider: "cloudflare-workers-ai",
         model: "@cf/zai-org/glm-4.7-flash",
         ai_binding_configured: Boolean(env.AI),
@@ -150,6 +162,9 @@ export default {
     const section = String(context.section || "غير محدد");
     const subject = String(context.subject || "غير محدد");
     const bookTitle = String(context.bookTitle || "غير محدد");
+    const bookFileName = String(context.bookFileName || bookTitle || "غير محدد");
+    const librarySubject = String(context.librarySubject || "غير محدد");
+    const libraryBranch = String(context.libraryBranch || "");
     const lessonTitle = String(context.lessonTitle || "غير محدد");
     const pageStart = String(context.pageStart || "غير محدد");
     const pageEnd = String(context.pageEnd || "غير محدد");
@@ -173,6 +188,8 @@ export default {
 الشعبة: ${section}
 المادة: ${subject}
 الكتاب: ${bookTitle}
+ملف PDF المصدر الحقيقي: ${bookFileName}
+تصنيف الكتاب في المكتبة: ${librarySubject}${libraryBranch ? ` / ${libraryBranch}` : ""}
 الدرس/الوحدة: ${lessonTitle}
 الصفحات: ${pageStart} إلى ${pageEnd}
 التاريخ: ${lessonDate}
@@ -180,7 +197,8 @@ export default {
 قواعد الإجابة:
 - أجب بالعربية الواضحة والسليمة.
 - اجعل الإجابة عملية ومباشرة وقابلة للاستخدام داخل الصف.
-- إذا أرسل التطبيق نصًا مستخرجًا من كتاب PDF، اعتبر هذا النص المصدر الأساسي والتزم به.
+- إذا أرسل التطبيق نصًا مستخرجًا من كتاب PDF، فهذا النص هو المصدر الوحيد لمحتوى التحضير والتزم به حصراً.
+- اسم المادة أو تصنيف الكتاب معلومات تنظيمية فقط، ولا يجوز استخدامها كمصدر بديل عن نص ملف PDF المحدد.
 - لا تدّعِ وجود معلومة أو درس في الكتاب إن لم تكن موجودة في النص المرسل.
 - لا تخترع وحدات أو دروسًا أو صفحات.
 - إذا كان جزء من المطلوب غير واضح في النص، اذكر ذلك صراحة.
@@ -214,12 +232,28 @@ export default {
         max_completion_tokens: 3200,
       });
 
-      const text = extractText(result);
+      let text = extractText(result);
 
-      if (!text) {
+      // Some older/partial model responses can contain a placeholder instead of the lesson.
+      // Retry once with a shorter explicit instruction while preserving the same book text.
+      if (isPlaceholderText(text)) {
+        const retry = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
+          messages: [
+            { role: "system", content: systemPrompt },
+            {
+              role: "user",
+              content: `${groundedPrompt}\n\nمهم: أعد التحضير الآن كنص عربي كامل. لا ترسل عبارة رد بلا نص ولا إجابة فارغة.`,
+            },
+          ],
+          max_completion_tokens: 3200,
+        });
+        text = extractText(retry);
+      }
+
+      if (isPlaceholderText(text)) {
         return json(
           {
-            error: "وصل رد من خدمة الذكاء لكن بدون نص صالح.",
+            error: "خدمة الذكاء لم تُرجع نص التحضير بعد محاولتين.",
             code: "empty_ai_response",
             result_keys:
               result && typeof result === "object" ? Object.keys(result) : [],
@@ -232,6 +266,13 @@ export default {
         text,
         provider: "cloudflare-workers-ai",
         model: "@cf/zai-org/glm-4.7-flash",
+        source: {
+          bookTitle,
+          bookFileName,
+          pageStart,
+          pageEnd,
+          referenceChars: referenceText.length,
+        },
       });
     } catch (error) {
       return json(

@@ -153,6 +153,34 @@ const deletePdfBlob = async (id) => {
   db.close();
 };
 
+
+const extractAiText = (data) => {
+  if (!data) return "";
+  const direct = [data.text, data.answer, data.result, data.response, data.output_text];
+  for (const value of direct) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  const choice = data?.choices?.[0]?.message?.content;
+  if (typeof choice === "string" && choice.trim()) return choice.trim();
+  if (Array.isArray(choice)) {
+    const joined = choice
+      .map((item) =>
+        typeof item === "string"
+          ? item
+          : typeof item?.text === "string"
+            ? item.text
+            : typeof item?.content === "string"
+              ? item.content
+              : "",
+      )
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    if (joined) return joined;
+  }
+  if (data.result && typeof data.result === "object") return extractAiText(data.result);
+  return "";
+};
 const extractPdfText = async (bookId, startPage = 1, endPage = startPage) => {
   const blob = await getPdfBlob(bookId);
   if (!blob) throw new Error("لم يتم العثور على ملف الكتاب");
@@ -300,17 +328,13 @@ function App() {
   );
   useEffect(() => {
     if (!plannerBook) return;
-    const incompatible =
-      plannerBook.grade !== grade ||
-      (isGeneralScience
-        ? plannerBook.subject !== "العلوم العامة" ||
-          plannerBook.branch !== sciencePrepSubject
-        : plannerBook.subject !== subject);
-    if (incompatible) {
+    // الكتاب مصدر مستقل؛ المادة/الفرع يحددان طريقة التحضير فقط.
+    // لا نمسح اختيار الكتاب عند تغيير المادة ما دام الكتاب للصف نفسه.
+    if (plannerBook.grade !== grade) {
       setPlannerBook(null);
       setAiError("");
     }
-  }, [grade, subject, sciencePrepSubject, plannerBook, isGeneralScience]);
+  }, [grade, plannerBook]);
   const classStudents = useMemo(
     () => students.filter((s) => s.grade === grade && s.section === section),
     [students, grade, section],
@@ -331,15 +355,8 @@ function App() {
   );
   const preparationSubject = isGeneralScience ? sciencePrepSubject : subject;
   const aiBooks = useMemo(
-    () =>
-      libraryBooks.filter(
-        (b) =>
-          b.grade === grade &&
-          (isGeneralScience
-            ? b.subject === "العلوم العامة" && b.branch === sciencePrepSubject
-            : b.subject === subject),
-      ),
-    [libraryBooks, grade, subject, isGeneralScience, sciencePrepSubject],
+    () => libraryBooks.filter((b) => b.grade === grade),
+    [libraryBooks, grade],
   );
   const bookKey = `${grade}|${section}|${subject}`;
   const book = gradebooks[bookKey] || {
@@ -742,7 +759,9 @@ ${extracted.text}
 الصف: ${plannerBook.grade}
 الشعبة: ${section}
 المادة: ${preparationSubject}
-اسم الكتاب: ${plannerBook.title}
+اسم الكتاب الظاهر: ${plannerBook.title}
+اسم ملف PDF الحقيقي: ${plannerBook.fileName || plannerBook.title}
+تصنيف الكتاب في المكتبة: ${plannerBook.subject}${plannerBook.branch ? ` / ${plannerBook.branch}` : ""}
 عنوان الدرس/الوحدة: ${lessonName}
 التاريخ: ${lessonDate}
 الصفحات: ${extracted.startPage} إلى ${extracted.endPage}
@@ -780,6 +799,9 @@ ${extracted.text}
             subject: preparationSubject,
             bookId: plannerBook.id,
             bookTitle: plannerBook.title,
+            bookFileName: plannerBook.fileName || plannerBook.title,
+            librarySubject: plannerBook.subject || "",
+            libraryBranch: plannerBook.branch || "",
             lessonTitle: lessonName,
             lessonDate,
             pageStart: extracted.startPage,
@@ -791,11 +813,26 @@ ${extracted.text}
         signal: controller.signal,
       });
       clearTimeout(timer);
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok)
-        throw new Error(data?.error || `خطأ من الخادم (${response.status})`);
-      const text = data?.text || data?.answer || data?.result;
-      if (!text) throw new Error("وصل رد من خدمة الذكاء بدون نص صالح.");
+      const raw = await response.text();
+      let data = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = { text: raw };
+      }
+      if (!response.ok) {
+        const detail = data?.message || data?.code || "";
+        throw new Error(
+          `${data?.error || `خطأ من الخادم (${response.status})`}${detail ? ` — ${detail}` : ""}`,
+        );
+      }
+      const text = extractAiText(data);
+      if (!text) {
+        const keys = data && typeof data === "object" ? Object.keys(data).join(", ") : "";
+        throw new Error(
+          `وصل رد من خدمة الذكاء بدون نص صالح${keys ? ` (الحقول: ${keys})` : ""}.`,
+        );
+      }
       setAiResult(String(text));
       setAiPrompt(`تحضير من كتاب ${plannerBook.title} — ${lessonName}`);
       setLibraryMessage(
@@ -1934,15 +1971,17 @@ ${extracted.text}
                   </div>
                   {plannerBook ? (
                     <div className="note">
-                      <strong>المصدر المحدد:</strong> {plannerBook.title} ·{" "}
-                      {plannerBook.grade} · {preparationSubject} · الصفحات{" "}
-                      {bookStartPage}–{bookEndPage}
+                      <strong>ملف المصدر:</strong> {plannerBook.fileName || plannerBook.title}
+                      <br />
+                      <strong>الكتاب:</strong> {plannerBook.title} · {plannerBook.grade}
+                      <br />
+                      <strong>مادة التحضير:</strong> {preparationSubject} · الصفحات {bookStartPage}–{bookEndPage}
                     </div>
                   ) : (
                     <div className="note">
                       {aiBooks.length
                         ? "اختر الكتاب الذي تريد التحضير منه."
-                        : "لا يوجد كتاب مطابق لهذا الصف والمادة. أضفه أولاً من «مكتبتي»."}
+                        : "لا يوجد كتاب محفوظ لهذا الصف. أضفه أولاً من «مكتبتي»."}
                     </div>
                   )}
                   <button
