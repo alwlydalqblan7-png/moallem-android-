@@ -1,6 +1,6 @@
 {
-  "appId": "com.taifdigital.moallem.v21",
-  "appName": "معلّم",
+  "appId": "com.taifdigital.moallem.rc1",
+  "appName": "معلّم RC1",
   "webDir": "dist",
   "server": {
     "androidScheme": "https"
