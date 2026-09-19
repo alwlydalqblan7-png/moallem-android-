@@ -32,6 +32,8 @@ import {
   CalendarDays,
   Copy,
   RefreshCw,
+  FileSpreadsheet,
+  X,
 } from "lucide-react";
 import { Printer } from "@capgo/capacitor-printer";
 import { App as CapacitorApp } from "@capacitor/app";
@@ -241,6 +243,10 @@ function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [search, setSearch] = useState("");
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkMessage, setBulkMessage] = useState("");
+  const bulkFileRef = useRef(null);
   const [libraryBooks, setLibraryBooks] = useState(() =>
     load("m2_library_books", []),
   );
@@ -418,6 +424,51 @@ function App() {
       ...x,
       { id: Date.now(), name: "طالب جديد", grade, section },
     ]);
+  const normalizeStudentNames = (text) => {
+    const rows = String(text || "").replace(/\r/g, "").split(/\n+/);
+    return rows
+      .map((row) => row.split(/[,;\t]/)[0].replace(/^["']|["']$/g, "").trim())
+      .filter((name, index, all) => name && all.indexOf(name) === index);
+  };
+  const confirmBulkStudents = () => {
+    const names = normalizeStudentNames(bulkText);
+    if (!names.length) {
+      setBulkMessage("أدخل أسماء الطلاب أولاً.");
+      return;
+    }
+    const existing = new Set(classStudents.map((s) => s.name.trim()));
+    const fresh = names.filter((name) => !existing.has(name));
+    if (!fresh.length) {
+      setBulkMessage("كل الأسماء موجودة مسبقاً في هذه الشعبة.");
+      return;
+    }
+    const base = Date.now();
+    setStudents((x) => [
+      ...x,
+      ...fresh.map((name, i) => ({ id: base + i, name, grade, section })),
+    ]);
+    setBulkText("");
+    setBulkMessage("");
+    setBulkOpen(false);
+  };
+  const importStudentList = async (file) => {
+    if (!file) return;
+    setBulkMessage("");
+    const ext = file.name.toLowerCase().split(".").pop();
+    if (!["csv", "txt"].includes(ext)) {
+      setBulkMessage("اختر CSV أو TXT. من Excel اختر حفظ باسم CSV ثم استورده.");
+      return;
+    }
+    try {
+      const text = await file.text();
+      setBulkText(text);
+      setBulkOpen(true);
+    } catch {
+      setBulkMessage("تعذر قراءة الملف. جرّب ملف CSV بترميز UTF-8.");
+    } finally {
+      if (bulkFileRef.current) bulkFileRef.current.value = "";
+    }
+  };
   const renameStudent = (id, name) =>
     setStudents((x) => x.map((s) => (s.id === id ? { ...s, name } : s)));
   const deleteStudent = (id) =>
@@ -827,7 +878,7 @@ ${extracted.text}
         );
       }
       const text = extractAiText(data);
-      if (!text) {
+      if (!text || ["رد بلا نص", "لا يوجد نص", "empty response"].includes(String(text).trim().replace(/[.!؟]/g, ""))) {
         const keys = data && typeof data === "object" ? Object.keys(data).join(", ") : "";
         throw new Error(
           `وصل رد من خدمة الذكاء بدون نص صالح${keys ? ` (الحقول: ${keys})` : ""}.`,
@@ -1322,6 +1373,19 @@ ${extracted.text}
                     <button onClick={sortArabic}>
                       <ArrowUpDown size={17} /> ترتيب أبجدي
                     </button>
+                    <button onClick={() => { setBulkMessage(""); setBulkOpen(true); }}>
+                      <Users size={17} /> إضافة دفعة
+                    </button>
+                    <button onClick={() => bulkFileRef.current?.click()}>
+                      <FileSpreadsheet size={17} /> استيراد CSV
+                    </button>
+                    <input
+                      ref={bulkFileRef}
+                      className="hidden-file"
+                      type="file"
+                      accept=".csv,.txt,text/csv,text/plain"
+                      onChange={(e) => importStudentList(e.target.files?.[0])}
+                    />
                     <button className="primary" onClick={addStudent}>
                       <UserPlus size={17} /> إضافة طالب
                     </button>
@@ -2121,6 +2185,39 @@ ${extracted.text}
           </>
         )}
       </main>
+      {bulkOpen && (
+        <div className="bulk-overlay" role="dialog" aria-modal="true" aria-label="إضافة الطلاب دفعة واحدة">
+          <section className="bulk-modal">
+            <header className="bulk-head">
+              <div>
+                <span className="eyebrow">إدارة الطلاب</span>
+                <h2>إضافة الطلاب دفعة واحدة</h2>
+                <p>{grade} — الشعبة {section}</p>
+              </div>
+              <button className="bulk-close" onClick={() => setBulkOpen(false)} aria-label="إغلاق">
+                <X size={20} />
+              </button>
+            </header>
+            <div className="bulk-body">
+              <p className="bulk-help">الصق اسماً في كل سطر، أو استورد CSV. سيُتجاهل الاسم المكرر داخل الشعبة.</p>
+              <textarea
+                className="bulk-textarea"
+                value={bulkText}
+                onChange={(e) => { setBulkText(e.target.value); setBulkMessage(""); }}
+                placeholder={"أحمد محمد\nخالد محمود\nوليد حسن"}
+                autoFocus
+              />
+              {bulkMessage && <div className="bulk-message">{bulkMessage}</div>}
+            </div>
+            <footer className="bulk-footer">
+              <button onClick={() => setBulkOpen(false)}>إلغاء</button>
+              <button className="primary" onClick={confirmBulkStudents}>
+                <UserPlus size={17} /> إضافة الطلاب
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
       {!reportPreview && (
         <nav className="nav">
           <button
