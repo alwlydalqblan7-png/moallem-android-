@@ -785,7 +785,7 @@ ${extracted.text}
 التاريخ: ${lessonDate}
 الصفحات: ${extracted.startPage} إلى ${extracted.endPage}
 
-أنشئ نموذج التحضير الحديث المعتمد للعام الدراسي 2026-2027، منظماً بعناوين واضحة وبالترتيب التالي:
+أنشئ تحضيراً وفق صورة نموذج تخطيط وتحضير الدروس الرسمي للعام 2026-2027. استخدم العناوين الحرفية التالية كلّاً في سطر مستقل: التهيئة، الأهداف التعليمية، سير الدرس، التقويم المرحلي، التقويم النهائي، الإغلاق والتغذية الراجعة. اكتب تحت كل عنوان المحتوى الخاص به من نص الكتاب حصراً. ثم أضف طرائق التدريس والاستراتيجيات، وموارد التعلم والوسائل التعليمية. لا تكرر المعلومات بين الأقسام. التفاصيل المطلوبة:
 1) المعلومات العامة: المادة، الصف، الشعبة، عنوان الدرس/الوحدة، التاريخ، اسم الكتاب والصفحات.
 2) النواتج والمخرجات التعليمية: أهداف سلوكية/معرفية واضحة وقابلة للقياس ومناسبة لطبيعة المادة. في الفقه والتفسير والحديث واللغة العربية صغها بما يلائم طبيعة المادة، وفي العلوم أدرج الفهم والتطبيق والملاحظة والاستنتاج عند ملاءمتها للنص.
 3) الاستراتيجيات والأنشطة التعليمية التعلمية: اختر ما يلائم الدرس مثل العصف الذهني، الحوار والمناقشة، التعلم النشط، التعلم التعاوني، والنشاط أو التجربة العملية عندما يدعمها محتوى الكتاب.
@@ -925,8 +925,50 @@ ${extracted.text}
         ),
       );
   };
-  const buildPreparationHtml = (item) =>
-    `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>body{font-family:Arial;padding:28px;line-height:1.9;color:#173653}h1{text-align:center;color:#1c3f66}.meta{background:#f5f7fa;padding:12px;border-radius:10px;margin-bottom:16px}pre{white-space:pre-wrap;font-family:Arial;font-size:14px}</style></head><body><h1>${item.title}</h1><div class="meta">المادة: ${item.subject || ""} · الصف: ${item.grade || ""} · الشعبة: ${item.section || ""} · التاريخ: ${item.lessonDate || ""}${item.bookTitle ? `<br>الكتاب: ${item.bookTitle}` : ""}${item.pageStart ? ` · الصفحات: ${item.pageStart}-${item.pageEnd}` : ""}</div><pre>${item.content.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre></body></html>`;
+  // The official notebook uses a ruled planning table. Preserve legacy free-text preparations.
+  const buildPreparationHtml = (item) => {
+    const safe = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const content = safe(item.content || "");
+    const lines = content.split(/\n/);
+    const section = (heading, nextHeading) => {
+      const start = lines.findIndex((line) => line.includes(heading));
+      if (start < 0) return "";
+      let end = lines.length;
+      for (let i = start + 1; i < lines.length; i++) {
+        if (nextHeading.some((name) => lines[i].includes(name))) { end = i; break; }
+      }
+      return lines.slice(start + 1, end).join("\n").trim();
+    };
+    const prep = section("التهيئة", ["الأهداف التعليمية", "سير الدرس", "التقويم المرحلي", "التقويم النهائي"]);
+    const goals = section("الأهداف التعليمية", ["سير الدرس", "التقويم المرحلي", "التقويم النهائي"]);
+    const flow = section("سير الدرس", ["التقويم المرحلي", "التقويم النهائي"]);
+    const formative = section("التقويم المرحلي", ["التقويم النهائي", "الإغلاق"]);
+    const finalEval = section("التقويم النهائي", ["الإغلاق", "التغذية الراجعة"]);
+    const closing = section("الإغلاق", ["الواجب", "ملاحظات"]);
+    const hasSections = [goals, flow, formative, finalEval].some(Boolean);
+    const cell = (value) => safe(value).replace(/\n/g, "<br>");
+    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
+      @page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,Tahoma,sans-serif;color:#222;margin:0;font-size:12px;line-height:1.55}
+      h1{text-align:center;font-size:19px;margin:0 0 10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #888;padding:7px;vertical-align:top;overflow-wrap:anywhere}
+      th,.tint{background:#eee9d8}th{text-align:center}.meta td{width:50%}.block{border:1px solid #888;padding:8px;min-height:45px}
+      .label{font-weight:bold;background:#eee9d8;padding:5px 8px;border:1px solid #888;border-bottom:0;margin-top:9px}
+      .planning td{height:220px;white-space:pre-wrap}.legacy{white-space:pre-wrap;font:inherit;line-height:1.7}
+      .small{font-size:11px}.foot{margin-top:8px;text-align:left;font-size:10px}
+      </style></head><body>
+      <h1>نموذج تخطيط وتحضير الدروس</h1>
+      <table class="meta"><tr><td><b>الصف والشعبة:</b> ${safe(item.grade)} / ${safe(item.section)}</td><td><b>المادة:</b> ${safe(item.subject)}</td></tr>
+      <tr><td><b>الموضوع:</b> ${safe(item.title)}</td><td><b>التاريخ:</b> ${safe(item.lessonDate)} &nbsp; <b>الحصة:</b> ${safe(item.period || "")}</td></tr></table>
+      <div class="label">طرائق التدريس والاستراتيجيات</div><div class="block">${cell(item.strategies || "")}</div>
+      <div class="label">موارد التعلم والوسائل التعليمية</div><div class="block">${cell(item.resources || "")}</div>
+      <div class="label">التهيئة — الزمن: ${safe(item.introMinutes || "")}</div><div class="block">${cell(prep)}</div>
+      <table class="planning"><thead><tr><th style="width:25%">الأهداف التعليمية</th><th style="width:40%">سير الدرس</th><th style="width:25%">التقويم المرحلي</th><th style="width:10%">الزمن</th></tr></thead>
+      <tbody><tr><td>${cell(goals)}</td><td>${cell(flow)}</td><td>${cell(formative)}</td><td>${safe(item.lessonMinutes || "")}</td></tr></tbody></table>
+      <div class="label">التقويم النهائي</div><div class="block">${cell(finalEval)}</div>
+      <div class="label">الإغلاق والتغذية الراجعة</div><div class="block">${cell(closing)}</div>
+      ${hasSections ? "" : `<div class="label">نص التحضير المحفوظ (الصيغة السابقة)</div><div class="block legacy">${content}</div>`}
+      <div class="foot">${item.bookTitle ? `المصدر: ${safe(item.bookTitle)}` : ""} ${item.pageStart ? `— الصفحات ${safe(item.pageStart)}–${safe(item.pageEnd)}` : ""}</div>
+      </body></html>`;
+  };
   const printPreparation = (item) =>
     printDocument(item.title, buildPreparationHtml(item));
   const aiRun = async () => {
