@@ -1089,7 +1089,7 @@ ${sourceExcerpt}
       *{box-sizing:border-box;print-color-adjust:exact;-webkit-print-color-adjust:exact}
       html,body{margin:0;padding:0;font-family:Arial,Tahoma,sans-serif;color:#111;direction:rtl}
       body{font-size:11px;line-height:1.45}
-      .sheet{min-height:282mm;display:flex;flex-direction:column;border:1px solid #888;padding:5mm;break-after:page;page-break-after:always}
+      .sheet{min-height:282mm;display:flex;flex-direction:column;border:1px solid #888;padding:5mm}
       h1{text-align:center;font-size:17px;line-height:1.25;margin:0 0 3mm;color:#1769aa}
       .school{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #777;padding:0 1mm 2mm;margin-bottom:2mm;font-size:10px}
       table{width:100%;border-collapse:collapse;table-layout:fixed}
