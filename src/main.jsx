@@ -761,6 +761,7 @@ ${extracted.text}
     setAiLoading(true);
     setAiError("");
     setLibraryMessage("جاري قراءة صفحات الكتاب...");
+    let extractedTextForFallback = "";
     try {
       const extracted = await extractPdfText(
         plannerBook.id,
@@ -771,6 +772,7 @@ ${extracted.text}
         throw new Error(
           "لم يتم العثور على نص قابل للقراءة في الصفحات المحددة.",
         );
+      extractedTextForFallback = extracted.text;
       const lessonName = bookLessonTitle.trim() || "الدرس المحدد";
       const promptText = `أنت مساعد معلم للمنهاج السوري.
 اعتمد حصراً على نص الكتاب المرفق أدناه، ولا تضف معلومات أو دروس غير موجودة فيه.
@@ -805,7 +807,7 @@ ${extracted.text}
         "https://moallem-ai.liondangerous65.workers.dev/api/ai"
       ).trim();
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 90000);
+      const timer = setTimeout(() => controller.abort(), 120000);
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -831,8 +833,8 @@ ${extracted.text}
         }),
         signal: controller.signal,
       });
-      clearTimeout(timer);
       const raw = await response.text();
+      clearTimeout(timer);
       let data = {};
       try {
         data = raw ? JSON.parse(raw) : {};
@@ -863,8 +865,36 @@ ${extracted.text}
         err?.name === "AbortError"
           ? "انتهت مهلة الاتصال بالذكاء. حاول مجدداً."
           : err?.message || "تعذر تحضير الدرس من الكتاب.";
-      setAiError(message);
-      setLibraryMessage(message);
+      if (err?.name === "AbortError" && extractedTextForFallback) {
+        const sourceExcerpt = extractedTextForFallback.slice(0, 14000);
+        setAiResult(`مسودة من نص الكتاب — لم يكتمل اتصال الذكاء الاصطناعي
+
+الموضوع: ${bookLessonTitle.trim() || "الدرس المحدد"}
+
+التهيئة
+تُكتب بعد مراجعة نص الدرس أدناه.
+
+الأهداف التعليمية
+تُستخرج من نص الدرس أدناه وتُراجع من المعلم.
+
+سير الدرس
+النص المستخرج من الصفحات المحددة:
+${sourceExcerpt}
+
+التقويم المرحلي
+يُعدّ المعلم أسئلة مرتبطة بالنص أعلاه.
+
+التقويم النهائي
+يُحدّد بعد مراجعة الأهداف التعليمية.
+
+الإغلاق والتغذية الراجعة
+يُستكمل بعد تنفيذ الدرس.`);
+        setAiError("انتهت مهلة خدمة الذكاء. عُرضت مسودة من نص الكتاب فقط، وليست تحضيراً مولّداً بالذكاء. راجعها وعدّلها قبل الحفظ.");
+        setLibraryMessage("تعذّر التحضير الذكي، لكن نص الصفحات المستخرج متاح للمراجعة.");
+      } else {
+        setAiError(message);
+        setLibraryMessage(message);
+      }
     } finally {
       setAiLoading(false);
     }
