@@ -43,6 +43,7 @@ import moallemIcon from "./assets/moallem-icon.png";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { autoColorHtml, mergeSubjectOptions } from "./preparation-format.js";
+import { decodePdfBackupEntries } from "./backup-format.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 const DEFAULT_GRADES = [
@@ -193,24 +194,10 @@ const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
   reader.onerror = () => reject(reader.error);
   reader.readAsDataURL(blob);
 });
-const dataUrlToBlob = (value) => {
-  const [head, data] = String(value).split(",");
-  const mime = head.match(/data:([^;]+)/)?.[1] || "application/pdf";
-  const binary = atob(data || "");
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mime });
-};
 const replacePdfBlobs = async (pdfs) => {
-  if (!Array.isArray(pdfs)) throw new Error("قائمة ملفات PDF غير صالحة");
   // Decode every file before opening the write transaction. A malformed backup
   // must never clear the user's existing IndexedDB library.
-  const decoded = pdfs.map((pdf) => {
-    if (!pdf?.id || typeof pdf.data !== "string" || !pdf.data.startsWith("data:application/pdf;base64,")) throw new Error("تحتوي النسخة على ملف PDF غير صالح");
-    const blob = dataUrlToBlob(pdf.data);
-    if (!blob.size) throw new Error("أحد ملفات PDF في النسخة فارغ");
-    return {id:String(pdf.id),blob};
-  });
+  const decoded = decodePdfBackupEntries(pdfs);
   const db = await openPdfDb();
   try {
     await new Promise((resolve, reject) => {
