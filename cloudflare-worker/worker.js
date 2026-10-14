@@ -206,7 +206,7 @@ export default {
 - أكمل المهمة حتى النهاية ولا تتوقف بعد الأهداف.
 - لا تستخدم عناوين إنكليزية إلا إذا كانت موجودة أصلًا في النص المرسل.
 
-عند طلب تحضير درس التزم بنموذج 2026–2027: المعلومات العامة، نواتج قابلة للقياس، التهيئة، طرائق التدريس والاستراتيجيات، موارد التعلم والوسائل التعليمية، سير الدرس ودور المعلم والمتعلم، نشاط آمن إن دعمه النص، التقويم المرحلي، التقويم النهائي المستقل، الواجب والملاحظات، الإغلاق والتغذية الراجعة، الملخص والأسئلة الداعمة عند ملاءمتها. ضع كل عنوان مطلوب في سطر مستقل.
+عند طلب تحضير درس، استخدم عناوين واضحة ومخططاً عاماً قابلاً للتعديل. لا تصف أي ترتيب أو نموذج بأنه رسمي أو وزاري ما لم يرفق المستخدم نموذجاً موثقاً. يمكن اقتراح معلومات الدرس والأهداف والتهيئة وسير الدرس والتقويم والواجب كأقسام عامة، لا كاشتراط رسمي.
 
 قواعد ملزمة:
 - تعامل مع «علم الأحياء والأرض» و«الفيزياء» و«الكيمياء» كمواد تحضير مستقلة ولا تخلط بينها، حتى لو جُمعت علاماتها في الجلاء تحت «العلوم العامة».
@@ -235,7 +235,7 @@ export default {
           },
         ],
         max_completion_tokens: 1800,
-      });
+      }, { rejectIfBusy: true });
 
       const text = extractText(result);
       const durationMs = Date.now() - startedAt;
@@ -267,14 +267,17 @@ export default {
         },
       });
     } catch (error) {
+      const message = String(error?.message || error || "Unknown error");
+      const busy = /busy|capacity|429|overloaded/i.test(message);
+      const timedOut = /timeout|timed out|deadline/i.test(message);
       return json(
         {
-          error: "تعذر تنفيذ الطلب عبر Workers AI.",
-          code: "workers_ai_error",
-          message: String(error?.message || error || "Unknown error"),
+          error: busy ? "خدمة الذكاء مشغولة حالياً؛ أعد المحاولة بعد قليل." : timedOut ? "تجاوزت خدمة الذكاء مهلة التنفيذ." : "تعذر تنفيذ الطلب عبر Workers AI.",
+          code: busy ? "ai_capacity_busy" : timedOut ? "ai_inference_timeout" : "workers_ai_error",
+          message,
           durationMs: Date.now() - startedAt,
         },
-        502,
+        busy ? 429 : timedOut ? 504 : 502,
       );
     }
   },

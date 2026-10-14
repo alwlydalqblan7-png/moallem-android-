@@ -42,6 +42,7 @@ import "./styles.css";
 import moallemIcon from "./assets/moallem-icon.png";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { autoColorHtml, mergeSubjectOptions } from "./preparation-format.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 const DEFAULT_GRADES = [
@@ -78,6 +79,7 @@ const DEFAULT_SUBJECTS = [
   "التربية الموسيقية",
   "التربية الرياضية",
 ];
+const ADDED_SUBJECTS = ["العلوم", "الفيزياء والكيمياء"];
 const seedStudents = [
   { id: 1, name: "أحمد محمد", grade: "السابع", section: "أ" },
   { id: 2, name: "سارة خالد", grade: "السابع", section: "أ" },
@@ -109,6 +111,23 @@ const load = (k, f) => {
   }
 };
 const persist = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+const sanitizeRichHtml = (html) => {
+  const doc = new DOMParser().parseFromString(`<div>${html || ""}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  const allowed = new Set(["DIV","P","BR","SPAN","B","STRONG","I","EM","U","UL","OL","LI"]);
+  const clean = (node) => {
+    for (const child of [...node.childNodes]) {
+      if (child.nodeType === Node.TEXT_NODE) continue;
+      if (child.nodeType !== Node.ELEMENT_NODE || !allowed.has(child.tagName)) { child.replaceWith(...child.childNodes); continue; }
+      const color = child.style?.color;
+      for (const attr of [...child.attributes]) child.removeAttribute(attr.name);
+      if (/^(#[0-9a-f]{3,8}|rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\))$/i.test(color || "")) child.setAttribute("style", `color:${color}`);
+      clean(child);
+    }
+  };
+  clean(root);
+  return root.innerHTML;
+};
 
 const PDF_DB = "moallem_library";
 const PDF_STORE = "pdfs";
@@ -183,17 +202,27 @@ const dataUrlToBlob = (value) => {
   return new Blob([bytes], { type: mime });
 };
 const replacePdfBlobs = async (pdfs) => {
-  const db = await openPdfDb();
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction(PDF_STORE, "readwrite");
-    const store = tx.objectStore(PDF_STORE);
-    store.clear();
-    for (const pdf of pdfs) if (pdf?.id && typeof pdf.data === "string") store.put(dataUrlToBlob(pdf.data), String(pdf.id));
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error || new Error("تعذرت استعادة ملفات PDF"));
+  if (!Array.isArray(pdfs)) throw new Error("قائمة ملفات PDF غير صالحة");
+  // Decode every file before opening the write transaction. A malformed backup
+  // must never clear the user's existing IndexedDB library.
+  const decoded = pdfs.map((pdf) => {
+    if (!pdf?.id || typeof pdf.data !== "string" || !pdf.data.startsWith("data:application/pdf;base64,")) throw new Error("تحتوي النسخة على ملف PDF غير صالح");
+    const blob = dataUrlToBlob(pdf.data);
+    if (!blob.size) throw new Error("أحد ملفات PDF في النسخة فارغ");
+    return {id:String(pdf.id),blob};
   });
-  db.close();
+  const db = await openPdfDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(PDF_STORE, "readwrite");
+      const store = tx.objectStore(PDF_STORE);
+      store.clear();
+      for (const pdf of decoded) store.put(pdf.blob, pdf.id);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("تعذرت استعادة ملفات PDF"));
+    });
+  } finally { db.close(); }
 };
 
 
@@ -340,9 +369,12 @@ function App() {
   const [sections, setSections] = useState(() =>
     load("m2_sections", DEFAULT_SECTIONS),
   );
-  const [subjects, setSubjects] = useState(() =>
-    load("m2_subjects", DEFAULT_SUBJECTS),
-  );
+  const [subjects, setSubjects] = useState(() => {
+    const current = load("m2_subjects", DEFAULT_SUBJECTS);
+    // Add options without renaming/removing any subject that may own old records.
+    return mergeSubjectOptions(current, ADDED_SUBJECTS);
+  });
+  const [subjectTeachers, setSubjectTeachers] = useState(() => load("m2_subject_teachers", {}));
   const [students, setStudents] = useState(() =>
     load("m2_students", seedStudents),
   );
@@ -365,6 +397,7 @@ function App() {
   const [online, setOnline] = useState(navigator.onLine);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiResult, setAiResult] = useState("");
+  const [aiRichContent, setAiRichContent] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [search, setSearch] = useState("");
@@ -456,6 +489,7 @@ function App() {
   useEffect(() => persist("m2_grades", grades), [grades]);
   useEffect(() => persist("m2_sections", sections), [sections]);
   useEffect(() => persist("m2_subjects", subjects), [subjects]);
+  useEffect(() => persist("m2_subject_teachers", subjectTeachers), [subjectTeachers]);
   useEffect(() => persist("m2_students", students), [students]);
   useEffect(() => persist("m2_attendance", attendance), [attendance]);
   useEffect(() => persist("m2_gradebooks", gradebooks), [gradebooks]);
@@ -902,7 +936,7 @@ ${extracted.text}
         );
       extractedTextForFallback = extracted.text;
       const lessonName = bookLessonTitle.trim() || "الدرس المحدد";
-      const promptText = `أنشئ تحضير درس عربي عملياً وفق نموذج 2026–2027. اتبع عناوين مستقلة: التهيئة، الأهداف التعليمية القابلة للقياس، طرائق التدريس والاستراتيجيات، موارد التعلم والوسائل التعليمية، سير الدرس، التقويم المرحلي، التقويم النهائي، الواجب المنزلي والملاحظات، الإغلاق والتغذية الراجعة، ملخص الدرس، أسئلة داعمة عند ملاءمتها. اعتمد حصراً على نص الكتاب المرجعي المرفق، وافصل مادة ${preparationSubject} عن فروع العلوم الأخرى. لا تخترع معلومة أو تجربة؛ اذكر بوضوح ما لا يدعمه النص. بيانات الدرس: الصف ${plannerBook.grade}، الشعبة ${section}، المادة ${preparationSubject}، العنوان ${lessonName}، التاريخ ${lessonDate}، الصفحات ${extracted.startPage}-${extracted.endPage}.`;
+      const promptText = `أنشئ تحضير درس عربيًا عمليًا بعناوين واضحة قابلة للتعديل. لا تدّعِ أن ترتيب العناوين أو القالب معتمد رسميًا؛ لم يُتحقق من نموذج وزاري منشور. اعتمد حصراً على نص الكتاب المرجعي المرفق، وافصل مادة ${preparationSubject} عن فروع العلوم الأخرى. لا تخترع معلومة أو تجربة؛ اذكر بوضوح ما لا يدعمه النص. بيانات الدرس: الصف ${plannerBook.grade}، الشعبة ${section}، المادة ${preparationSubject}، العنوان ${lessonName}، التاريخ ${lessonDate}، الصفحات ${extracted.startPage}-${extracted.endPage}.`;
       const endpoint = (
         import.meta.env.VITE_AI_API_URL ||
         "https://moallem-ai.liondangerous65.workers.dev/api/ai"
@@ -1048,6 +1082,7 @@ ${sourceExcerpt}
       pageStart: bookStartPage,
       pageEnd: bookEndPage,
       content: String(content),
+      richContent: aiRichContent || savedPreparations.find(v=>v.id===editingPreparationId)?.richContent || autoColorHtml(content),
       boardOverride: savedPreparations.find(v=>v.id===editingPreparationId)?.boardOverride ?? null,
       updatedAt: new Date().toISOString(),
     };
@@ -1056,6 +1091,7 @@ ${sourceExcerpt}
   };
   const openPreparation = (item) => {
     setAiResult(item.content);
+    setAiRichContent(item.richContent || "");
     setAiPrompt(item.title);
     setGrade(item.grade || grade);
     setSection(item.section || section);
@@ -1078,13 +1114,14 @@ ${sourceExcerpt}
       if (editingPreparationId === id) setEditingPreparationId(null);
     }
   };
-  const updateCurrentPreparation = (text) => {
+  const updateCurrentPreparation = (text, html = aiRichContent) => {
     setAiResult(text);
+    setAiRichContent(html);
     if (editingPreparationId)
       setSavedPreparations((x) =>
         x.map((v) =>
           v.id === editingPreparationId
-            ? { ...v, content: text, updatedAt: new Date().toISOString() }
+            ? { ...v, content: text, richContent: html, updatedAt: new Date().toISOString() }
             : v,
         ),
       );
@@ -1095,6 +1132,7 @@ ${sourceExcerpt}
   const buildPreparationHtml = (item) => {
     const safe = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const content = String(item.content || "");
+    const richContent = sanitizeRichHtml(item.richContent || autoColorHtml(content));
     const lines = content.split(/\n/);
     const section = (heading, nextHeading) => {
       const headings = Array.isArray(heading) ? heading : [heading];
@@ -1129,12 +1167,13 @@ ${sourceExcerpt}
       .planning td{height:220px;white-space:pre-wrap}.legacy{white-space:pre-wrap;font:inherit;line-height:1.7}
       .small{font-size:11px}.foot{margin-top:8px;text-align:left;font-size:10px}.signature{display:flex;justify-content:space-between;gap:15px;margin-top:22px}.signature img{display:block;height:58px;max-width:180px;object-fit:contain}
       </style></head><body>
-      <h1>نموذج تخطيط وتحضير الدروس</h1>
+      <h1>دفتر التحضير</h1>
       <table class="meta"><tr><td><b>المدرسة:</b> ${safe(schoolSettings.school)}</td><td><b>مديرية التربية:</b> ${safe(schoolSettings.directorate)}</td></tr>
-      <tr><td><b>المعلم:</b> ${safe(schoolSettings.teacher)}</td><td><b>المدير:</b> ${safe(schoolSettings.principal)}</td></tr>
+      <tr><td><b>المعلم:</b> ${safe(subjectTeachers[item.subject] || schoolSettings.teacher)}</td><td><b>المدير:</b> ${safe(schoolSettings.principal)}</td></tr>
       <tr><td><b>العام الدراسي:</b> ${safe(schoolSettings.year)}</td><td><b>الصف والشعبة:</b> ${safe(item.grade)} / ${safe(item.section)}</td></tr>
       <tr><td><b>المادة:</b> ${safe(item.subject)}</td><td></td></tr>
       <tr><td><b>الموضوع:</b> ${safe(item.title)}</td><td><b>التاريخ:</b> ${safe(item.lessonDate)} &nbsp; <b>الحصة:</b> ${safe(item.period || "")}</td></tr></table>
+      ${richContent ? `<div class="label">نص التحضير</div><div class="block legacy rich-print">${richContent}</div>` : `
       <div class="label">طرائق التدريس والاستراتيجيات</div><div class="block">${cell(item.strategies || strategies)}</div>
       <div class="label">موارد التعلم والوسائل التعليمية</div><div class="block">${cell(item.resources || resources)}</div>
       <div class="label">التهيئة — الزمن: ${safe(item.introMinutes || "")}</div><div class="block">${cell(prep)}</div>
@@ -1145,7 +1184,7 @@ ${sourceExcerpt}
       ${(homework || notes) ? `<div class="label">الواجب المنزلي والملاحظات</div><div class="block">${cell([homework, notes].filter(Boolean).join("\n\n"))}</div>` : ""}
       ${summary ? `<div class="label">ملخص الدرس</div><div class="block">${cell(summary)}</div>` : ""}
       ${supportingQuestions ? `<div class="label">أسئلة داعمة</div><div class="block">${cell(supportingQuestions)}</div>` : ""}
-      ${hasSections ? "" : `<div class="label">نص التحضير المحفوظ (الصيغة السابقة)</div><div class="block legacy">${safe(content)}</div>`}
+      ${hasSections ? "" : `<div class="label">نص التحضير المحفوظ (الصيغة السابقة)</div><div class="block legacy">${safe(content)}</div>`}`}
       <div class="foot">${item.bookTitle ? `المصدر: ${safe(item.bookTitle)}` : ""} ${item.pageStart ? `— الصفحات ${safe(item.pageStart)}–${safe(item.pageEnd)}` : ""}</div>
       <div class="signature"><div><b>توقيع المعلم:</b>${schoolSettings.signature ? `<img alt="توقيع المعلم" src="${safe(schoolSettings.signature)}">` : " ........................................"}</div><div><b>توقيع المدير:</b> ........................................</div></div>
       </body></html>`;
@@ -1243,8 +1282,8 @@ ${sourceExcerpt}
     ...calc(s),
   }));
   return (
-    <div className="app">
-      <header className="top">
+    <div className={`app ${tab === "board" ? "board-immersive" : ""}`}>
+      {tab !== "board" && <header className="top">
         <div className="brand">
           <img src={moallemIcon} />
           <div>
@@ -1256,8 +1295,8 @@ ${sourceExcerpt}
           {online ? <Wifi size={16} /> : <WifiOff size={16} />}{" "}
           {online ? "متصل" : "بدون إنترنت"}
         </div>
-      </header>
-      {!reportPreview && (
+      </header>}
+      {!reportPreview && tab !== "board" && (
         <div className="classbar">
           <select value={grade} onChange={(e) => setGrade(e.target.value)}>
             {grades.map((x) => (
@@ -1276,7 +1315,7 @@ ${sourceExcerpt}
           </select>
         </div>
       )}
-      <main>
+      <main className={tab === "board" ? "board-main" : ""}>
         {reportPreview ? (
           <section className="preview-page">
             <div className="preview-toolbar">
@@ -2174,11 +2213,7 @@ ${sourceExcerpt}
                 )}
                 {aiResult && (
                   <>
-                    <textarea
-                      className="airesult editable-result"
-                      value={aiResult}
-                      onChange={(e) => updateCurrentPreparation(e.target.value)}
-                    />
+                    <PreparationEditor key={String(editingPreparationId || "draft")} text={aiResult} initialHtml={aiRichContent || autoColorHtml(aiResult)} onChange={updateCurrentPreparation}/>
                     <div className="actions prep-actions">
                       <button
                         className="primary"
@@ -2201,6 +2236,7 @@ ${sourceExcerpt}
                             pageStart: bookStartPage,
                             pageEnd: bookEndPage,
                             content: aiResult,
+                            richContent: aiRichContent || autoColorHtml(aiResult),
                           })
                         }
                       >
@@ -2253,99 +2289,41 @@ ${sourceExcerpt}
               </section>
             )}
             {tab === "board" && (
-              <section className="panel board-panel">
-                <div className="panelhead"><div><span className="eyebrow">التحاضير المرتبطة</span><h2>دفتر السبورة</h2><p>يُنشأ الدرس تلقائياً مع التحضير المحفوظ. النسخة المخصصة تبقى مستقلة عند تحديث التحضير.</p></div></div>
-                {savedPreparations.length === 0 ? <div className="empty-state">ستظهر تحاضير السبورة هنا بعد إنشاء تحضير عام.</div> : savedPreparations.map(item => (
-                  <article className="board-entry" key={item.id}>
+              <section className="board-workspace">
+                <div className="board-topbar">
+                  <button onClick={() => setTab("home")}>رجوع</button>
+                  <strong>دفتر السبورة</strong>
+                  {savedPreparations.length > 0 && <select aria-label="اختيار تحضير السبورة" value={savedPreparations.some((x) => x.id === editingPreparationId) ? editingPreparationId : savedPreparations[0].id} onChange={(e) => setEditingPreparationId(Number(e.target.value))}>{savedPreparations.map((item) => <option key={item.id} value={item.id}>{item.title} — {item.subject}</option>)}</select>}
+                </div>
+                {savedPreparations.length === 0 ? <div className="empty-state">ستظهر تحاضير السبورة هنا بعد إنشاء تحضير عام.</div> : (() => {
+                  const item = savedPreparations.find((x) => String(x.id) === String(editingPreparationId)) || savedPreparations[0];
+                  return <article className="board-entry board-entry-full" key={item.id}>
                     <div className="board-meta"><strong>{item.title}</strong><span>اليوم: {boardDayName(item.lessonDate)} · التاريخ: {item.lessonDate || "—"}</span><span>الصف {item.grade} · الشعبة {item.section} · {item.subject}</span></div>
-                    <label>النقاط الأساسية على السبورة<textarea dir="rtl" value={item.boardOverride ?? boardSummary(item.content)} onChange={e => updateBoardCopy(item.id, e.target.value)} /></label>
-                    <div className="actions">
-                      <button onClick={() => printBoardPreparation(item)}><PrinterIcon size={15}/> طباعة تحضير السبورة</button>
-                      {item.boardOverride != null && <button onClick={() => useAutomaticBoardCopy(item.id)}>استعادة النقاط التلقائية</button>}
-                      <button onClick={() => openPreparation(item)}><FolderOpen size={15}/> فتح التحضير العام</button>
-                    </div>
-                  </article>
-                ))}
+                    <label>النقاط الأساسية<textarea dir="rtl" value={item.boardOverride ?? boardSummary(item.content)} onChange={e => updateBoardCopy(item.id, e.target.value)} /></label>
+                    <BoardCanvas boardId={item.id} />
+                    <div className="actions"><button onClick={() => printBoardPreparation(item)}><PrinterIcon size={15}/> طباعة تحضير السبورة</button>{item.boardOverride != null && <button onClick={() => useAutomaticBoardCopy(item.id)}>استعادة النقاط التلقائية</button>}<button onClick={() => openPreparation(item)}><FolderOpen size={15}/> فتح التحضير العام</button></div>
+                  </article>;
+                })()}
               </section>
             )}
             {tab === "settings" && (
-              <section className="panel">
-                <div className="panelhead">
-                  <div>
-                    <span className="eyebrow">التخصيص</span>
-                    <h2>كل بند قابل للتعديل</h2>
-                  </div>
-                </div>
-                <div className="config">
-                  <h3>بيانات المعلم والمدرسة</h3>
-                  {[
-                    ["teacher","اسم المعلم"],["principal","اسم مدير المدرسة"],["school","اسم المدرسة"],
-                    ["directorate","مديرية التربية"],["year","العام الدراسي"]
-                  ].map(([key,label])=><label key={key} style={{display:"block",margin:"12px 0"}}>{label}
-                    <input style={{display:"block",width:"100%",marginTop:5}} value={schoolSettings[key]||""}
-                      onChange={e=>setSchoolSettings(v=>({...v,[key]:e.target.value}))}/>
-                  </label>)}
-                  <h4>توقيع المعلم</h4>
-                  <SignaturePad value={schoolSettings.signature || ""} onChange={signature=>setSchoolSettings(v=>({...v,signature}))}/>
-                  <p className="note">تُحفظ البيانات تلقائياً على هذا الجهاز.</p>
-                </div>
-                <div className="config">
-                  <h3>أوقات الحصص</h3>
-                  {periodSettings.map((times,index)=><div key={index} style={{display:"flex",gap:8,alignItems:"center",margin:"10px 0",flexWrap:"wrap"}}>
-                    <strong>الحصة {index+1}</strong>
-                    <label>من <input type="time" value={times[0]} onChange={e=>setPeriodSettings(p=>p.map((t,i)=>i===index?[e.target.value,t[1]]:t))}/></label>
-                    <label>إلى <input type="time" value={times[1]} onChange={e=>setPeriodSettings(p=>p.map((t,i)=>i===index?[t[0],e.target.value]:t))}/></label>
-                  </div>)}
-                </div>
-                <div className="config">
-                  <h3>التنبيه الصوتي</h3>
-                  {[
-                    ["enabled","تفعيل التنبيه الصوتي"],["start","تنبيه بداية الحصة"],["end","تنبيه نهاية الحصة"]
-                  ].map(([key,label])=><label key={key} style={{display:"block",margin:"12px 0"}}>
-                    <input type="checkbox" checked={Boolean(soundSettings[key])} onChange={e=>setSoundSettings(v=>({...v,[key]:e.target.checked}))}/> {label}
-                  </label>)}
-                  <button type="button" className="primary" onClick={scheduleClassNotifications}><Bell size={16}/> جدولة تنبيهات الأسبوع</button>
-                  {notificationMessage && <p className="note" role="status">{notificationMessage}</p>}
-                  <p className="note">تُجدول التنبيهات محلياً في Android وتعمل والتطبيق مغلق. قد يؤخر وضع توفير الطاقة الإشعارات، وقد يتطلب Android 12+ السماح بالتنبيهات الدقيقة من إعدادات النظام.</p>
-                </div>
-                <div className="config">
-                  <h3>النسخ الاحتياطي</h3>
-                  <p className="note">تشمل النسخة بيانات الطلاب والعلامات والتحاضير والإعدادات وتوقيع المعلم وملفات الكتب PDF. قد يكون الملف كبيراً عند وجود كتب كثيرة.</p>
-                  <button type="button" onClick={exportSettingsBackup}>تنزيل نسخة احتياطية</button>
-                  <label style={{display:"block",marginTop:14}}>استعادة نسخة احتياطية
-                    <input type="file" accept=".json,application/json" onChange={e=>importSettingsBackup(e.target.files?.[0])}/>
-                  </label>
-                </div>
-                <Config
-                  title="الصفوف"
-                  items={grades}
-                  kind="الصف"
-                  add={() => addItem("الصف")}
-                  rename={renameItem}
-                  remove={removeItem}
-                />
-                <Config
-                  title="الشُعب"
-                  items={sections}
-                  kind="الشعبة"
-                  add={() => addItem("الشعبة")}
-                  rename={renameItem}
-                  remove={removeItem}
-                />
-                <Config
-                  title="المواد"
-                  items={subjects}
-                  kind="المادة"
-                  add={() => addItem("المادة")}
-                  rename={renameItem}
-                  remove={removeItem}
-                />
+              <section className="panel settings-panel" dir="rtl">
+                <div className="panelhead"><div><span className="eyebrow">التخصيص</span><h2>الإعدادات</h2><p>بياناتك محفوظة على هذا الجهاز تلقائياً.</p></div></div>
+                <details className="settings-section" open><summary>١. بيانات المعلم</summary><label className="setting-field">اسم المعلم<input value={schoolSettings.teacher || ""} onChange={e=>setSchoolSettings(v=>({...v,teacher:e.target.value}))}/></label><label className="setting-field">اسم المدير<input value={schoolSettings.principal || ""} onChange={e=>setSchoolSettings(v=>({...v,principal:e.target.value}))}/></label></details>
+                <details className="settings-section"><summary>٢. بيانات المدرسة</summary><label className="setting-field">اسم المدرسة<input value={schoolSettings.school || ""} onChange={e=>setSchoolSettings(v=>({...v,school:e.target.value}))}/></label><label className="setting-field">مديرية التربية<input value={schoolSettings.directorate || ""} onChange={e=>setSchoolSettings(v=>({...v,directorate:e.target.value}))}/></label><label className="setting-field">العام الدراسي<input value={schoolSettings.year || ""} onChange={e=>setSchoolSettings(v=>({...v,year:e.target.value}))}/></label></details>
+                <details className="settings-section"><summary>٣. المواد الدراسية والمعلمون</summary><p className="note">لكل مادة دفتر علامات وتحاضير مستقلان. عند إضافة هذه الخيارات تبقى المواد والسجلات القديمة كما هي.</p><Config title="المواد" items={subjects} kind="المادة" add={() => addItem("المادة")} rename={renameItem} remove={removeItem}/><div className="subject-teachers"><h4>معلم المادة</h4>{subjects.map(name=><label className="setting-field" key={name}>{name}<input placeholder={schoolSettings.teacher || "اسم المعلم"} value={subjectTeachers[name] || ""} onChange={e=>setSubjectTeachers(v=>({...v,[name]:e.target.value}))}/></label>)}</div></details>
+                <details className="settings-section"><summary>٤. الجدول المدرسي وأوقات الحصص</summary><p className="note">تُضبط هنا أوقات الحصص السبع. تفاصيل توزيع الصفوف والأيام تبقى في صفحة الجدول.</p>{periodSettings.map((times,index)=><div className="period-row" key={index}><strong>الحصة {index+1}</strong><label>من<input type="time" value={times[0]} onChange={e=>setPeriodSettings(p=>p.map((t,i)=>i===index?[e.target.value,t[1]]:t))}/></label><label>إلى<input type="time" value={times[1]} onChange={e=>setPeriodSettings(p=>p.map((t,i)=>i===index?[t[0],e.target.value]:t))}/></label></div>)}</details>
+                <details className="settings-section"><summary>٥. التنبيهات الصوتية</summary>{[["enabled","تفعيل التنبيهات"],["start","تنبيه بداية الحصة"],["end","تنبيه نهاية الحصة"]].map(([key,label])=><label className="setting-check" key={key}><input type="checkbox" checked={Boolean(soundSettings[key])} onChange={e=>setSoundSettings(v=>({...v,[key]:e.target.checked}))}/>{label}</label>)}<button type="button" className="primary" onClick={scheduleClassNotifications}><Bell size={16}/> جدولة تنبيهات الأسبوع</button>{notificationMessage && <p className="note" role="status">{notificationMessage}</p>}<p className="note">تُجدول تنبيهات محلية في Android. قد يؤخر وضع توفير الطاقة الإشعار، وقد يتطلب Android 12+ السماح بالتنبيهات الدقيقة.</p></details>
+                <details className="settings-section"><summary>٦. إعدادات دفتر التحضير والطباعة</summary><p className="note">الألوان الافتراضية: الأزرق للعناوين، الأحمر للملاحظات والتنبيهات، الأخضر للأهداف والأنشطة، والأسود للنص الأساسي. يمكن تغيير لون نص محدد من شريط المحرر وإعادة اللون التلقائي.</p><p className="note">لم نعثر في ملفات المشروع أو البحث بالمصادر الرسمية على نموذج تحضير وزاري منشور لعام 2026–2027. لذلك أبقينا الطباعة قالبًا عامًا قابلًا للتخصيص، ولم نسمِّه نموذجًا رسميًا.</p></details>
+                <details className="settings-section"><summary>٧. توقيع المعلم</summary><SignaturePad value={schoolSettings.signature || ""} onChange={signature=>setSchoolSettings(v=>({...v,signature}))}/><p className="note">ارسم توقيعك بالإصبع. يظهر في طباعة التحضير العام.</p></details>
+                <details className="settings-section"><summary>٨. النسخ الاحتياطي والاستعادة</summary><p className="note">تتضمن النسخة بيانات الطلاب والعلامات والتحاضير والإعدادات والتوقيع وملفات كتب PDF المخزنة محلياً.</p><div className="settings-actions"><button type="button" onClick={exportSettingsBackup}>تنزيل نسخة احتياطية</button><label className="restore-file">استعادة نسخة احتياطية<input type="file" accept=".json,application/json" onChange={e=>importSettingsBackup(e.target.files?.[0])}/></label></div><p className="note">تطلب الاستعادة تأكيداً قبل استبدال البيانات الموجودة.</p></details>
+                <details className="settings-section"><summary>إدارة الصفوف والشُعب</summary><Config title="الصفوف" items={grades} kind="الصف" add={() => addItem("الصف")} rename={renameItem} remove={removeItem}/><Config title="الشُعب" items={sections} kind="الشعبة" add={() => addItem("الشعبة")} rename={renameItem} remove={removeItem}/></details>
               </section>
             )}
           </>
         )}
       </main>
-      {!reportPreview && (
+      {!reportPreview && tab !== "board" && (
         <nav className="nav">
           <button
             className={tab === "home" ? "active" : ""}
@@ -2384,7 +2362,7 @@ ${sourceExcerpt}
             onClick={() => setTab("settings")}
           >
             <Settings />
-            <span>تعديل</span>
+            <span>الإعدادات</span>
           </button>
         </nav>
       )}
@@ -2435,6 +2413,84 @@ function SignaturePad({ value, onChange }) {
   };
   const clear = () => { const canvas = canvasRef.current; const context = canvas.getContext("2d"); context.clearRect(0, 0, canvas.clientWidth, 150); onChange(""); };
   return <div className="signature-pad"><canvas ref={canvasRef} aria-label="ارسم توقيع المعلم بالإصبع" onPointerDown={begin} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish}/><div><span>ارسم التوقيع داخل الإطار</span><button type="button" onClick={clear}>مسح التوقيع</button></div></div>;
+}
+function PreparationEditor({ text, initialHtml, onChange }) {
+  const editorRef = useRef(null);
+  useEffect(() => { if(editorRef.current) editorRef.current.innerHTML = sanitizeRichHtml(initialHtml || autoColorHtml(text)); }, []);
+  const notify = () => {
+    const editor=editorRef.current;
+    if(!editor)return;
+    const html=sanitizeRichHtml(editor.innerHTML);
+    const plain=(editor.innerText || editor.textContent || "").replace(/\u00a0/g," ").replace(/\n{3,}/g,"\n\n").trim();
+    onChange(plain,html);
+  };
+  const paint = (color) => {
+    const editor=editorRef.current;
+    if(!editor)return;
+    editor.focus();
+    const selection=window.getSelection();
+    if(!selection || selection.isCollapsed || !editor.contains(selection.anchorNode))return;
+    document.execCommand("styleWithCSS",false,true);
+    document.execCommand("foreColor",false,color);
+    notify();
+  };
+  const automatic = () => {
+    const editor=editorRef.current;
+    const value=(editor?.innerText || editor?.textContent || text).replace(/\u00a0/g," ");
+    if(editor)editor.innerHTML=autoColorHtml(value);
+    notify();
+  };
+  return <div className="preparation-editor"><div className="prep-color-tools"><strong>لون النص المحدد:</strong><button type="button" className="prep-blue" onMouseDown={e=>e.preventDefault()} onClick={()=>paint("#1769aa")}>أزرق</button><button type="button" className="prep-red" onMouseDown={e=>e.preventDefault()} onClick={()=>paint("#d32f2f")}>أحمر</button><button type="button" className="prep-green" onMouseDown={e=>e.preventDefault()} onClick={()=>paint("#16834a")}>أخضر</button><button type="button" className="prep-black" onMouseDown={e=>e.preventDefault()} onClick={()=>paint("#111111")}>أسود</button><button type="button" onClick={automatic}>إعادة اللون التلقائي</button></div><div ref={editorRef} className="airesult editable-result rich-editor" contentEditable suppressContentEditableWarning dir="rtl" role="textbox" aria-label="نص التحضير القابل للتحرير" onInput={notify}/><p className="note">حدّد الكلمات أولاً ثم اختر لونها. تحفظ الألوان مع التحضير وتظهر في الطباعة وملف PDF.</p></div>;
+}
+function BoardCanvas({ boardId }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  const strokesRef = useRef([]);
+  const redoRef = useRef([]);
+  const [color, setColor] = useState("#111111");
+  const [tool, setTool] = useState("pen");
+  const storageKey = `m2_board_canvas_${boardId}`;
+  const redraw = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(rect.width * ratio));
+    canvas.height = Math.max(1, Math.round(rect.height * ratio));
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    for (const stroke of strokesRef.current) {
+      if (!stroke.points?.length) continue;
+      ctx.beginPath();
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.lineWidth = stroke.width || 4;
+      ctx.strokeStyle = stroke.tool === "erase" ? "#fff" : (stroke.color === "#d32f2f" ? "#d32f2f" : "#111");
+      const first = stroke.points[0];
+      ctx.moveTo(first.x * rect.width, first.y * rect.height);
+      for (const point of stroke.points.slice(1)) ctx.lineTo(point.x * rect.width, point.y * rect.height);
+      if (stroke.points.length === 1) ctx.lineTo(first.x * rect.width + 0.01, first.y * rect.height + 0.01);
+      ctx.stroke();
+    }
+  };
+  useEffect(() => {
+    try { strokesRef.current = JSON.parse(localStorage.getItem(storageKey) || "[]"); } catch { strokesRef.current = []; }
+    redoRef.current = [];
+    const observer = new ResizeObserver(redraw);
+    if (canvasRef.current) observer.observe(canvasRef.current);
+    redraw();
+    return () => observer.disconnect();
+  }, [storageKey]);
+  const saveAndDraw = () => { localStorage.setItem(storageKey, JSON.stringify(strokesRef.current)); redraw(); };
+  const point = (event) => { const r = event.currentTarget.getBoundingClientRect(); return {x:(event.clientX-r.left)/r.width,y:(event.clientY-r.top)/r.height}; };
+  const begin = (event) => { event.currentTarget.setPointerCapture(event.pointerId); drawing.current = true; strokesRef.current = [...strokesRef.current,{tool,color, width:tool === "erase" ? 30 : 4,points:[point(event)]}]; redraw(); };
+  const move = (event) => { if(!drawing.current)return; const next=strokesRef.current.slice(); const last=next[next.length-1]; next[next.length-1]={...last,points:[...last.points,point(event)]}; strokesRef.current=next; if(last.points.length % 6 === 0) localStorage.setItem(storageKey,JSON.stringify(strokesRef.current)); redraw(); };
+  const finish = () => { if(!drawing.current)return; drawing.current=false; redoRef.current=[]; localStorage.setItem(storageKey,JSON.stringify(strokesRef.current)); };
+  const undo = () => { if(!strokesRef.current.length)return; redoRef.current=[...redoRef.current,strokesRef.current.at(-1)]; strokesRef.current=strokesRef.current.slice(0,-1); saveAndDraw(); };
+  const redo = () => { if(!redoRef.current.length)return; strokesRef.current=[...strokesRef.current,redoRef.current.at(-1)]; redoRef.current=redoRef.current.slice(0,-1); saveAndDraw(); };
+  const clear = () => { strokesRef.current=[]; redoRef.current=[]; saveAndDraw(); };
+  return <div className="board-canvas-wrap"><div className="board-tools"><button className={tool==="pen"?"tool-active":""} onClick={()=>setTool("pen")}>القلم</button><button className={color==="#111111"?"color-active":""} onClick={()=>{setColor("#111111");setTool("pen");}}>أسود</button><button className={color==="#d32f2f"?"color-active red-tool":"red-tool"} onClick={()=>{setColor("#d32f2f");setTool("pen");}}>أحمر</button><button className={tool==="erase"?"tool-active":""} onClick={()=>setTool("erase")}>الممحاة</button><button onClick={undo}>تراجع</button><button onClick={redo}>إعادة</button><button onClick={clear}>مسح السبورة</button></div><canvas ref={canvasRef} className="board-canvas" aria-label="اكتب على السبورة بالإصبع" onPointerDown={begin} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish} /></div>;
 }
 function Tile({ icon, title, text, onClick, tone = "blue" }) {
   return (

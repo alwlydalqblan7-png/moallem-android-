@@ -255,4 +255,51 @@ main{padding:11px}
 .board-meta span{font-size:12px;color:var(--muted)}
 .board-entry label{display:grid;gap:6px;font-weight:700;color:var(--ink)}
 .board-entry textarea{width:100%;min-height:150px;border:1px solid #dce5ec;border-radius:12px;padding:12px;font:inherit;line-height:1.8;resize:vertical}
+.board-immersive{height:100dvh;min-height:100dvh;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);overflow:hidden;background:#f5f7fa}
+.board-main{height:100%;max-width:none;margin:0;padding:8px;overflow:hidden}
+.board-workspace{height:100%;display:flex;flex-direction:column;gap:8px}
+.board-topbar{display:flex;align-items:center;gap:8px;min-height:42px}
+.board-topbar strong{white-space:nowrap;color:var(--navy)}
+.board-topbar select{flex:1;min-width:0;font:inherit;border:1px solid #dce5ec;border-radius:10px;padding:9px;background:white}
+.board-topbar button,.board-tools button{min-height:40px;padding:8px 11px;border:1px solid #dce5ec;border-radius:10px;background:#fff;font:inherit;font-weight:700;color:var(--navy)}
+.board-entry-full{flex:1;min-height:0;overflow:auto;padding:8px}
+.board-entry-full .board-meta{gap:2px}
+.board-entry-full .board-meta strong{font-size:15px}
+.board-entry-full .board-meta span{font-size:11px}
+.board-entry-full label{font-size:12px}
+.board-entry-full textarea{min-height:60px;max-height:90px;padding:7px}
+.board-canvas-wrap{display:flex;flex-direction:column;flex:1;min-height:260px;gap:5px}
+.board-tools{display:flex;gap:5px;overflow-x:auto;flex:0 0 auto}
+.board-tools button{min-height:36px;padding:6px 9px;white-space:nowrap;font-size:12px}
+.board-tools .tool-active{background:#eaf4fc;border-color:#4b99ce}
+.board-tools .color-active{outline:2px solid #111}
+.board-tools .red-tool{color:#c62828}
+.board-canvas{display:block;width:100%;flex:1;min-height:210px;border:1px solid #c7d1da;border-radius:10px;background:#fff;touch-action:none}
+.settings-panel{display:grid;gap:6px}
+.settings-section{border:1px solid #e2eaf0;border-radius:14px;padding:0 12px;background:#fff}
+.settings-section>summary{cursor:pointer;list-style:none;padding:15px 28px 15px 0;font-weight:800;color:var(--navy);position:relative}
+.settings-section>summary::-webkit-details-marker{display:none}
+.settings-section>summary:before{content:"＋";position:absolute;right:1px;top:14px;color:#5080a0}
+.settings-section[open]>summary:before{content:"−"}
+.setting-field{display:grid;gap:6px;margin:10px 0;font-size:13px;font-weight:700}
+.setting-field input,.period-row input{width:100%;min-width:0;border:1px solid #dce5ec;border-radius:10px;padding:10px;font:inherit;background:#fff;color:var(--ink)}
+.subject-teachers{margin:8px 0}
+.period-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:end;margin:10px 0}
+.period-row>strong{grid-column:1/-1;color:#355a76}
+.period-row label{display:grid;gap:5px;font-size:12px}
+.setting-check{display:flex;align-items:center;gap:8px;margin:12px 0}
+.settings-actions{display:flex;gap:8px;flex-wrap:wrap}
+.settings-actions button,.restore-file{border:1px solid #dce5ec;border-radius:10px;padding:10px 12px;background:#fff;color:var(--navy);font:inherit;font-weight:700}
+.restore-file{display:grid;gap:8px}
+.restore-file input{max-width:100%;font:inherit}
+.preparation-editor{margin:12px 0}
+.prep-color-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 8px}
+.prep-color-tools strong{font-size:12px;margin-inline-end:3px}
+.prep-color-tools button{min-height:36px;border:1px solid #dce5ec;border-radius:9px;background:#fff;padding:6px 9px;font:inherit;font-size:12px;font-weight:700}
+.prep-blue{color:#1769aa!important}.prep-red{color:#d32f2f!important}.prep-green{color:#16834a!important}.prep-black{color:#111!important}
+.rich-editor{min-height:420px;max-height:none;overflow:auto;outline:none;color:#111;white-space:normal}
+.rich-editor:focus{border-color:#6daed6;box-shadow:0 0 0 2px rgba(79,183,255,.13)}
+.rich-editor div{min-height:1.7em}
+.rich-print{white-space:normal;color:#111}.rich-print div{min-height:1.5em}
+@media(max-width:480px){.board-entry-full{padding:7px}.board-canvas-wrap{min-height:220px}.board-topbar strong{font-size:13px}.board-topbar button{padding-inline:8px}.period-row{grid-template-columns:1fr 1fr}.period-row>strong{grid-column:1/-1}}
 @media(max-width:390px){.nav button{font-size:9px}.nav button svg{width:17px;height:17px}}

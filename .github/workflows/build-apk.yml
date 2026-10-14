@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Test Cloudflare Worker
-        run: npm run test:worker
+        run: npm test
       - name: Build web app
         env:
           VITE_AI_API_URL: https://moallem-ai.liondangerous65.workers.dev/api/ai
