@@ -1,0 +1,43 @@
+package __APP_PACKAGE__;
+
+import android.appwidget.AppWidgetManager;
+import android.content.ComponentName;
+import android.content.Context;
+import android.os.Build;
+import android.os.Bundle;
+import com.getcapacitor.JSArray;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+
+@CapacitorPlugin(name = "HomeWidget")
+public class HomeWidgetPlugin extends Plugin {
+    @PluginMethod
+    public void syncSchedule(PluginCall call) {
+        JSArray periods = call.getArray("periods");
+        if (periods == null) {
+            call.reject("بيانات أوقات الحصص غير صالحة");
+            return;
+        }
+        getContext().getSharedPreferences("moallem_widget", Context.MODE_PRIVATE)
+            .edit().putString("periods", periods.toString()).apply();
+        HomeWidgetProvider.updateAll(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void requestPin(PluginCall call) {
+        boolean supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+            && AppWidgetManager.getInstance(getContext()).isRequestPinAppWidgetSupported();
+        if (supported) {
+            AppWidgetManager.getInstance(getContext()).requestPinAppWidget(
+                new ComponentName(getContext(), HomeWidgetProvider.class), new Bundle(), null
+            );
+        }
+        JSObject result = new JSObject();
+        result.put("supported", supported);
+        call.resolve(result);
+    }
+}

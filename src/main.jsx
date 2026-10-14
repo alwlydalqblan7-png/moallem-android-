@@ -35,7 +35,7 @@ import {
   Bell,
 } from "lucide-react";
 import { Printer } from "@capgo/capacitor-printer";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { LocalNotifications } from "@capacitor/local-notifications";
 import "./styles.css";
@@ -44,7 +44,9 @@ import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { autoColorHtml, mergeSubjectOptions } from "./preparation-format.js";
 import { decodePdfBackupEntries } from "./backup-format.js";
+import { getDailyWidgetStatus, parseStudentNames } from "./student-tools.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+const HomeWidget = registerPlugin("HomeWidget");
 
 const DEFAULT_GRADES = [
   "السابع",
@@ -275,11 +277,25 @@ function App() {
     ["08:00","08:40"],["08:40","09:20"],["09:20","10:00"],["10:15","10:55"],
     ["10:55","11:35"],["11:50","12:25"],["12:25","13:00"]
   ]));
+  const [widgetMessage, setWidgetMessage] = useState("");
+  const [widgetNow, setWidgetNow] = useState(() => new Date());
+  const dailyWidgetStatus = useMemo(
+    () => getDailyWidgetStatus(periodSettings, widgetNow),
+    [periodSettings, widgetNow],
+  );
   const [soundSettings, setSoundSettings] = useState(() => load("m2_sound_settings", {enabled:false,start:true,end:true}));
   const [notificationMessage, setNotificationMessage] = useState("");
   useEffect(() => persist("m2_school_settings",schoolSettings),[schoolSettings]);
   useEffect(() => persist("m2_period_settings",periodSettings),[periodSettings]);
   useEffect(() => persist("m2_sound_settings",soundSettings),[soundSettings]);
+  useEffect(() => {
+    const timer = setInterval(() => setWidgetNow(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    HomeWidget.syncSchedule({ periods: periodSettings }).catch(() => {});
+  }, [periodSettings]);
   const scheduleClassNotifications = async () => {
     if (!Capacitor.isNativePlatform()) { setNotificationMessage("تنبيهات الخلفية متاحة في نسخة Android فقط."); return; }
     try {
@@ -320,6 +336,20 @@ function App() {
       await LocalNotifications.schedule({notifications});
       setNotificationMessage(`تمت جدولة ${notifications.length} تنبيهاً أسبوعياً.${exactAlarmsAllowed ? "" : " لم يُسمح بالتنبيه الدقيق؛ قد يتأخر بعضها وفق إدارة النظام."}`);
     } catch (error) { setNotificationMessage(error?.message || "تعذرت جدولة التنبيهات."); }
+  };
+  const requestHomeWidget = async () => {
+    if (!Capacitor.isNativePlatform()) {
+      setWidgetMessage("إضافة الويدجت متاحة في نسخة Android فقط.");
+      return;
+    }
+    try {
+      const result = await HomeWidget.requestPin();
+      setWidgetMessage(result?.supported
+        ? "أرسلنا طلب إضافة دفتر المعلّم. وافق في نافذة الشاشة الرئيسية لإتمام الإضافة."
+        : "اضغط مطولاً على الشاشة الرئيسية، ثم اختر الأدوات > معلّم تجريبي > دفتر المعلّم.");
+    } catch {
+      setWidgetMessage("اضغط مطولاً على الشاشة الرئيسية، ثم اختر الأدوات > معلّم تجريبي > دفتر المعلّم.");
+    }
   };
   const exportSettingsBackup = async () => {
     const data = {};
@@ -365,6 +395,9 @@ function App() {
   const [students, setStudents] = useState(() =>
     load("m2_students", seedStudents),
   );
+  const [bulkNamesOpen, setBulkNamesOpen] = useState(false);
+  const [bulkNamesText, setBulkNamesText] = useState("");
+  const [bulkNamesMessage, setBulkNamesMessage] = useState("");
   const [attendance, setAttendance] = useState(() => load("m2_attendance", {}));
   const [gradebooks, setGradebooks] = useState(() => load("m2_gradebooks", {}));
   const [grade, setGrade] = useState(() => load("m2_grade", "السابع"));
@@ -513,6 +546,17 @@ function App() {
     () => students.filter((s) => s.grade === grade && s.section === section),
     [students, grade, section],
   );
+  const bulkNameList = useMemo(() => parseStudentNames(bulkNamesText), [bulkNamesText]);
+  const bulkDuplicateCount = useMemo(() => {
+    const seen = new Set(classStudents.map((student) => student.name.replace(/\s+/g, " ").trim().toLocaleLowerCase("ar")));
+    let count = 0;
+    for (const name of bulkNameList) {
+      const normalized = name.replace(/\s+/g, " ").trim().toLocaleLowerCase("ar");
+      if (seen.has(normalized)) count++;
+      seen.add(normalized);
+    }
+    return count;
+  }, [classStudents, bulkNameList]);
   const visibleStudents = useMemo(
     () => classStudents.filter((s) => !search || s.name.includes(search)),
     [classStudents, search],
@@ -585,6 +629,34 @@ function App() {
       ...x,
       { id: Date.now(), name: "طالب جديد", grade, section },
     ]);
+  const addStudentsFromList = () => {
+    if (!bulkNameList.length) {
+      setBulkNamesMessage("ألصق الأسماء أولاً، اسمًا في كل سطر.");
+      return;
+    }
+    if (bulkDuplicateCount && !window.confirm(`توجد ${bulkDuplicateCount} أسماء مكررة في القائمة أو مسجلة في هذا الصف. ستبقى كطلاب مستقلين إذا أضفتها. هل تريد المتابعة؟`)) return;
+    const createdAt = Date.now();
+    const additions = bulkNameList.map((name, index) => ({
+      id: globalThis.crypto?.randomUUID?.() || `bulk-${createdAt}-${index}`,
+      name,
+      grade,
+      section,
+    }));
+    setStudents((current) => [...current, ...additions]);
+    setBulkNamesMessage(`تمت إضافة ${additions.length} طالبًا إلى ${grade} — الشعبة ${section}.`);
+    setBulkNamesText("");
+    setBulkNamesOpen(false);
+  };
+  const loadStudentNamesFile = async (file) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      setBulkNamesText(text);
+      setBulkNamesMessage(`تم تحميل الملف؛ عُثر على ${parseStudentNames(text).length} اسمًا.`);
+    } catch {
+      setBulkNamesMessage("تعذرت قراءة الملف. جرّب ملف CSV أو TXT بترميز UTF-8.");
+    }
+  };
   const renameStudent = (id, name) =>
     setStudents((x) => x.map((s) => (s.id === id ? { ...s, name } : s)));
   const deleteStudent = (id) =>
@@ -1442,6 +1514,21 @@ ${sourceExcerpt}
                     onClick={() => setTab("knowledge")}
                   />
                 </div>
+                <section className="home-widget-card" dir="rtl">
+                  <div className="home-widget-top">
+                    <strong>دفتر المعلّم</strong>
+                    <span>✓ اليوم</span>
+                  </div>
+                  <h3>{dailyWidgetStatus.status}</h3>
+                  <p>{dailyWidgetStatus.dayLabel}</p>
+                  <div className="home-widget-footer">
+                    <small>ويدجت لمتابعة حصص اليوم من الشاشة الرئيسية</small>
+                    <button className="primary" type="button" onClick={requestHomeWidget}>
+                      <Plus size={16} /> إضافة ويدجت
+                    </button>
+                  </div>
+                  {widgetMessage && <p className="note" role="status">{widgetMessage}</p>}
+                </section>
                 <section className="ai-card">
                   <div>
                     <span className="ai-icon">
@@ -1531,6 +1618,9 @@ ${sourceExcerpt}
                     <button onClick={sortArabic}>
                       <ArrowUpDown size={17} /> ترتيب أبجدي
                     </button>
+                    <button type="button" onClick={() => { setBulkNamesOpen((open) => !open); setBulkNamesMessage(""); }}>
+                      <Upload size={17} /> إضافة جماعية
+                    </button>
                     <button className="primary" onClick={addStudent}>
                       <UserPlus size={17} /> إضافة طالب
                     </button>
@@ -1544,6 +1634,39 @@ ${sourceExcerpt}
                     placeholder="ابحث عن طالب..."
                   />
                 </div>
+                {bulkNamesOpen && (
+                  <div className="bulk-students-box">
+                    <div className="bulk-students-head">
+                      <div>
+                        <strong>إضافة مجموعة أسماء</strong>
+                        <small>ستُضاف الأسماء إلى {grade} — الشعبة {section}</small>
+                      </div>
+                      <label className="bulk-file-button">
+                        <FileText size={16} /> تحميل CSV أو TXT
+                        <input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(event) => { loadStudentNamesFile(event.target.files?.[0]); event.target.value = ""; }} />
+                      </label>
+                    </div>
+                    <textarea
+                      className="bulk-students-input"
+                      value={bulkNamesText}
+                      onChange={(event) => { setBulkNamesText(event.target.value); setBulkNamesMessage(""); }}
+                      placeholder="الصق الأسماء هنا، اسمًا في كل سطر. يمكنك نسخ عمود الأسماء مباشرة من Excel أو Google Sheets."
+                      rows={5}
+                      dir="auto"
+                    />
+                    <div className="bulk-students-meta">
+                      <span>الأسماء المكتشفة: <strong>{bulkNameList.length}</strong></span>
+                      {bulkDuplicateCount > 0 && <span className="duplicate-hint">أسماء متكررة: {bulkDuplicateCount} — ستُضاف كطلاب منفصلين بعد التأكيد.</span>}
+                    </div>
+                    {bulkNamesMessage && <p className="bulk-message" role="status">{bulkNamesMessage}</p>}
+                    <div className="actions">
+                      <button className="primary" type="button" onClick={addStudentsFromList} disabled={!bulkNameList.length}>
+                        إضافة {bulkNameList.length} اسمًا
+                      </button>
+                      <button type="button" onClick={() => { setBulkNamesOpen(false); setBulkNamesMessage(""); }}>إغلاق</button>
+                    </div>
+                  </div>
+                )}
                 <div className="studentlist">
                   {visibleStudents.map((s, i) => (
                     <div className="studentrow" key={s.id}>
