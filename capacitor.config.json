@@ -1,6 +1,6 @@
 {
   "appId": "com.taifdigital.moallem.test202627",
-  "appName": "معلّم",
+  "appName": "معلّم تجريبي",
   "webDir": "dist",
   "server": {
     "androidScheme": "https"
