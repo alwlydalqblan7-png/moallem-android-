@@ -208,6 +208,39 @@ const extractPdfText = async (bookId, startPage = 1, endPage = startPage) => {
 };
 
 function App() {
+  const [schoolSettings, setSchoolSettings] = useState(() => load("m2_school_settings", { teacher:"", principal:"", school:"", directorate:"", year:"2026 - 2027" }));
+  const [periodSettings, setPeriodSettings] = useState(() => load("m2_period_settings", [
+    ["08:00","08:40"],["08:40","09:20"],["09:20","10:00"],["10:15","10:55"],
+    ["10:55","11:35"],["11:50","12:25"],["12:25","13:00"]
+  ]));
+  const [soundSettings, setSoundSettings] = useState(() => load("m2_sound_settings", {enabled:false,start:true,end:true}));
+  useEffect(() => persist("m2_school_settings",schoolSettings),[schoolSettings]);
+  useEffect(() => persist("m2_period_settings",periodSettings),[periodSettings]);
+  useEffect(() => persist("m2_sound_settings",soundSettings),[soundSettings]);
+  const exportSettingsBackup = () => {
+    const data = {};
+    for(let i=0;i<localStorage.length;i++){
+      const key=localStorage.key(i);
+      if(key?.startsWith("m2_")) data[key]=localStorage.getItem(key);
+    }
+    const blob=new Blob([JSON.stringify({format:"moallem-backup-v1",createdAt:new Date().toISOString(),data},null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");a.href=url;a.download="moallem-backup-"+new Date().toISOString().slice(0,10)+".json";a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),2000);
+  };
+  const importSettingsBackup = async (file) => {
+    if(!file)return;
+    try {
+      const backup=JSON.parse(await file.text());
+      if(backup?.format!=="moallem-backup-v1"||!backup.data||typeof backup.data!=="object")throw new Error("ملف النسخة غير صالح");
+      if(!window.confirm("استعادة النسخة ستستبدل بيانات التطبيق الحالية. هل أنت متأكد؟"))return;
+      for(const [key,value] of Object.entries(backup.data)){
+        if(key.startsWith("m2_")&&typeof value==="string")localStorage.setItem(key,value);
+      }
+      window.alert("تمت استعادة البيانات. سيُعاد تحميل التطبيق الآن.");
+      window.location.reload();
+    } catch(err){window.alert(err?.message||"تعذرت الاستعادة");}
+  };
   const [tab, setTab] = useState("home");
   const [grades, setGrades] = useState(() => load("m2_grades", DEFAULT_GRADES));
   const [sections, setSections] = useState(() =>
@@ -2107,6 +2140,42 @@ ${sourceExcerpt}
                     <span className="eyebrow">التخصيص</span>
                     <h2>كل بند قابل للتعديل</h2>
                   </div>
+                </div>
+                <div className="config">
+                  <h3>بيانات المعلم والمدرسة</h3>
+                  {[
+                    ["teacher","اسم المعلم"],["principal","اسم مدير المدرسة"],["school","اسم المدرسة"],
+                    ["directorate","مديرية التربية"],["year","العام الدراسي"]
+                  ].map(([key,label])=><label key={key} style={{display:"block",margin:"12px 0"}}>{label}
+                    <input style={{display:"block",width:"100%",marginTop:5}} value={schoolSettings[key]||""}
+                      onChange={e=>setSchoolSettings(v=>({...v,[key]:e.target.value}))}/>
+                  </label>)}
+                  <p className="note">تُحفظ البيانات تلقائياً على هذا الجهاز.</p>
+                </div>
+                <div className="config">
+                  <h3>أوقات الحصص</h3>
+                  {periodSettings.map((times,index)=><div key={index} style={{display:"flex",gap:8,alignItems:"center",margin:"10px 0",flexWrap:"wrap"}}>
+                    <strong>الحصة {index+1}</strong>
+                    <label>من <input type="time" value={times[0]} onChange={e=>setPeriodSettings(p=>p.map((t,i)=>i===index?[e.target.value,t[1]]:t))}/></label>
+                    <label>إلى <input type="time" value={times[1]} onChange={e=>setPeriodSettings(p=>p.map((t,i)=>i===index?[t[0],e.target.value]:t))}/></label>
+                  </div>)}
+                </div>
+                <div className="config">
+                  <h3>التنبيه الصوتي</h3>
+                  {[
+                    ["enabled","تفعيل التنبيه الصوتي"],["start","تنبيه بداية الحصة"],["end","تنبيه نهاية الحصة"]
+                  ].map(([key,label])=><label key={key} style={{display:"block",margin:"12px 0"}}>
+                    <input type="checkbox" checked={Boolean(soundSettings[key])} onChange={e=>setSoundSettings(v=>({...v,[key]:e.target.checked}))}/> {label}
+                  </label>)}
+                  <p className="note">هذه إعدادات محفوظة للتنبيه؛ تشغيل التنبيهات تلقائياً في الخلفية غير مفعّل بعد.</p>
+                </div>
+                <div className="config">
+                  <h3>النسخ الاحتياطي</h3>
+                  <p className="note">النسخة الحالية تحفظ بيانات الطلاب والعلامات والتحاضير والإعدادات المخزنة محلياً. ملفات الكتب PDF نفسها غير مشمولة؛ احتفظ بنسخ منها منفصلة.</p>
+                  <button type="button" onClick={exportSettingsBackup}>تنزيل نسخة احتياطية</button>
+                  <label style={{display:"block",marginTop:14}}>استعادة نسخة احتياطية
+                    <input type="file" accept=".json,application/json" onChange={e=>importSettingsBackup(e.target.files?.[0])}/>
+                  </label>
                 </div>
                 <Config
                   title="الصفوف"
