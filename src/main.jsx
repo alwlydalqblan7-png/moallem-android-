@@ -932,6 +932,30 @@ ${sourceExcerpt}
       setAiLoading(false);
     }
   };
+  const boardDayName = (date) => {
+    const d = new Date((date || new Date().toISOString().slice(0,10)) + "T12:00:00");
+    return Number.isNaN(d.getTime()) ? "" : new Intl.DateTimeFormat("ar-SY",{weekday:"long"}).format(d);
+  };
+  const boardSummary = (content) => {
+    const lines=String(content||"").split(/\\n/).map(x=>x.trim()).filter(Boolean);
+    const headings=/^(?:الأهداف|نواتج|التهيئة|المفاهيم|سير الدرس|الشرح|الأنشطة|التقويم|الواجب|الخلاصة|ملخص)/;
+    const selected=lines.filter(line=>headings.test(line.replace(/^[\\d٠-٩]+[.)-]?\\s*/,"")));
+    return (selected.length?selected:lines).slice(0,16).join("\\n").slice(0,3500);
+  };
+  const printBoardPreparation = (item) => {
+    const esc = escapePrint;
+    const content = item.boardOverride ?? boardSummary(item.content);
+    printDocument(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
+      body{font-family:Arial,sans-serif;padding:25px;color:#142b3d}
+      h1{text-align:center;border-bottom:3px solid #193f64;padding-bottom:12px}
+      .meta{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px;border:1px solid #aaa;border-radius:8px}
+      .lesson{white-space:pre-wrap;font-size:19px;line-height:2;border:1px solid #bbb;padding:18px;margin-top:18px;min-height:350px}
+      </style></head><body><h1>تحضير السبورة</h1><div class="meta">
+      <div>اليوم: ${esc(boardDayName(item.lessonDate))}</div><div>التاريخ: ${esc(item.lessonDate)}</div>
+      <div>الصف: ${esc(item.grade)}</div><div>الشعبة: ${esc(item.section)}</div>
+      <div>المادة: ${esc(item.subject)}</div><div>الدرس: ${esc(item.title)}</div>
+      </div><div class="lesson">${esc(content)}</div></body></html>`);
+  };
   const saveCurrentPreparation = () => {
     if (!aiResult.trim()) return;
     const title = (bookLessonTitle || aiPrompt || "تحضير درس").trim();
@@ -948,6 +972,7 @@ ${sourceExcerpt}
       pageStart: bookStartPage,
       pageEnd: bookEndPage,
       content: aiResult,
+      boardOverride: savedPreparations.find(v=>v.id===editingPreparationId)?.boardOverride ?? null,
       updatedAt: new Date().toISOString(),
     };
     setSavedPreparations((x) => [item, ...x.filter((v) => v.id !== item.id)]);
@@ -2117,6 +2142,7 @@ ${sourceExcerpt}
                           <button onClick={() => openPreparation(item)}>
                             <FolderOpen size={15} /> فتح
                           </button>
+                          <button onClick={() => printBoardPreparation(item)}><PrinterIcon size={15} /> السبورة</button>
                           <button onClick={() => printPreparation(item)}>
                             <PrinterIcon size={15} /> طباعة
                           </button>
