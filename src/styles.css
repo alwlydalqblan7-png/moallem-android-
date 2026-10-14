@@ -226,3 +226,16 @@ main{padding:11px}
 .ai-source-grid label:nth-child(-n+2){grid-column:1/-1}
 .saved-preparations article{align-items:flex-start;flex-direction:column}
 }
+
+
+/* Official Syrian weekly timetable — editable screen layout */
+.schedule-date-label{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0;padding:12px 16px;background:#f0ede2;color:#34312b;font-weight:700;border-radius:4px}
+.schedule-date-label input{max-width:220px}
+.official-schedule-scroll{overflow-x:auto;max-width:100%;border:1px solid #b4b0a4}
+.official-schedule{border-collapse:collapse;table-layout:fixed;min-width:880px;width:100%;direction:rtl;background:#fff}
+.official-schedule th,.official-schedule td{border:1px solid #b4b0a4;padding:0;text-align:center;vertical-align:middle}
+.official-schedule thead th,.official-schedule tbody th{background:#eee9d8;color:#34312b;font-weight:700;padding:12px 6px}
+.official-schedule tbody th{min-width:90px}
+.official-schedule td textarea{display:block;width:100%;min-width:100px;min-height:90px;box-sizing:border-box;border:0;border-radius:0;background:transparent;resize:vertical;padding:10px 6px;text-align:center;direction:rtl;font:inherit;color:#222}
+.official-schedule td textarea:focus{outline:2px solid #426f94;outline-offset:-2px;background:#faf9f3}
+.official-schedule-footer{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;background:#eee9d8;padding:14px;margin-top:12px;color:#34312b}
