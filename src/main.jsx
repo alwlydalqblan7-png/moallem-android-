@@ -523,16 +523,9 @@ function App() {
     () => classStudents.filter((s) => !search || s.name.includes(search)),
     [classStudents, search],
   );
-  const availableSubjects = useMemo(
-    () =>
-      GENERAL_SCIENCE_GRADES.includes(grade)
-        ? subjects.filter(
-            (s) =>
-              !["الفيزياء", "الكيمياء", "علم الأحياء", "علم الأرض"].includes(s),
-          )
-        : subjects,
-    [subjects, grade],
-  );
+  // Keep standalone subject choices available in every grade. The legacy
+  // aggregate "العلوم العامة" branch remains available without hiding them.
+  const availableSubjects = subjects;
   const preparationSubject = isGeneralScience ? sciencePrepSubject : subject;
   const aiBooks = useMemo(
     () => libraryBooks.filter((b) => b.grade === grade),
