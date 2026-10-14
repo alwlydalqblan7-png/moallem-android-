@@ -8,23 +8,25 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "android:add": "npx cap add android",
-    "android:sync": "npm run build && npx cap sync android",
-    "android:open": "npx cap open android"
+    "android:sync": "npm run build && npx cap sync android && node scripts/prepare-android.mjs",
+    "android:open": "npx cap open android",
+    "test:worker": "node --test tests/worker.test.js"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "lucide-react": "latest",
-    "@capacitor/core": "^7.4.3",
     "@capacitor/android": "^7.4.3",
     "@capacitor/app": "^7.0.0",
+    "@capacitor/core": "^7.4.3",
+    "@capacitor/local-notifications": "^7.0.7",
     "@capgo/capacitor-printer": "^7.0.0",
-    "pdfjs-dist": "latest"
+    "@vitejs/plugin-react": "latest",
+    "lucide-react": "latest",
+    "pdfjs-dist": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "vite": "latest"
   },
   "devDependencies": {
-    "@capacitor/cli": "^7.4.3",
-    "@capacitor/assets": "^3.0.5"
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.4.3"
   }
 }

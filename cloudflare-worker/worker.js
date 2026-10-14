@@ -137,6 +137,7 @@ export default {
     const prompt = String(body?.prompt || "").trim();
     const referenceText = String(body?.referenceText || "").trim();
     const context = body?.context || {};
+    const referenceTruncated = context.referenceTruncated === true;
 
     if (!prompt) {
       return json(
@@ -148,7 +149,7 @@ export default {
       );
     }
 
-    if (prompt.length > 12000 || referenceText.length > 50000) {
+    if (prompt.length > 4000 || referenceText.length > 18000) {
       return json(
         {
           error: "الطلب طويل جدًا.",
@@ -205,7 +206,7 @@ export default {
 - أكمل المهمة حتى النهاية ولا تتوقف بعد الأهداف.
 - لا تستخدم عناوين إنكليزية إلا إذا كانت موجودة أصلًا في النص المرسل.
 
-عند طلب تحضير درس التزم بنموذج 2026–2027: المعلومات العامة، نواتج قابلة للقياس، التمهيد والمفاهيم، الاستراتيجيات والأنشطة، سير الدرس ودور المعلم والمتعلم، الوسائل، تجربة أو نشاط آمن إن دعمه النص، التقويم المرحلي، التقويم النهائي المستقل، الواجب، الملاحظات، وملخص المدرس.
+عند طلب تحضير درس التزم بنموذج 2026–2027: المعلومات العامة، نواتج قابلة للقياس، التهيئة، طرائق التدريس والاستراتيجيات، موارد التعلم والوسائل التعليمية، سير الدرس ودور المعلم والمتعلم، نشاط آمن إن دعمه النص، التقويم المرحلي، التقويم النهائي المستقل، الواجب والملاحظات، الإغلاق والتغذية الراجعة، الملخص والأسئلة الداعمة عند ملاءمتها. ضع كل عنوان مطلوب في سطر مستقل.
 
 قواعد ملزمة:
 - تعامل مع «علم الأحياء والأرض» و«الفيزياء» و«الكيمياء» كمواد تحضير مستقلة ولا تخلط بينها، حتى لو جُمعت علاماتها في الجلاء تحت «العلوم العامة».
@@ -214,9 +215,13 @@ export default {
 - لا تضف تجربة أو معلومة لا يدعمها نص الصفحات المحددة.
 `.trim();
 
+    const startedAt = Date.now();
     try {
+      const truncationNotice = referenceTruncated
+        ? "\n\nتنبيه مصدر: وصل النص مقتطعاً بسبب حد حجم الطلب؛ وضّح ذلك ولا تدّعِ تغطية الصفحات التي لم يصل نصها."
+        : "";
       const groundedPrompt = referenceText
-        ? `${prompt}\n\nالنص المرجعي المستخرج من الكتاب:\n---\n${referenceText}\n---`
+        ? `${prompt}${truncationNotice}\n\nالنص المرجعي المستخرج من الكتاب:\n---\n${referenceText}\n---`
         : prompt;
       const result = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
         messages: [
@@ -229,34 +234,18 @@ export default {
             content: groundedPrompt,
           },
         ],
-        max_completion_tokens: 3200,
+        max_completion_tokens: 1800,
       });
 
-      let text = extractText(result);
-
-      // Some older/partial model responses can contain a placeholder instead of the lesson.
-      // Retry once with a shorter explicit instruction while preserving the same book text.
-      if (isPlaceholderText(text)) {
-        const retry = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
-          messages: [
-            { role: "system", content: systemPrompt },
-            {
-              role: "user",
-              content: `${groundedPrompt}\n\nمهم: أعد التحضير الآن كنص عربي كامل. لا ترسل عبارة رد بلا نص ولا إجابة فارغة.`,
-            },
-          ],
-          max_completion_tokens: 3200,
-        });
-        text = extractText(retry);
-      }
-
+      const text = extractText(result);
+      const durationMs = Date.now() - startedAt;
       if (isPlaceholderText(text)) {
         return json(
           {
-            error: "خدمة الذكاء لم تُرجع نص التحضير بعد محاولتين.",
+            error: "خدمة الذكاء لم تُرجع نصاً صالحاً. أُوقف الطلب بعد محاولة واحدة لتفادي مضاعفة زمن الانتظار.",
             code: "empty_ai_response",
-            result_keys:
-              result && typeof result === "object" ? Object.keys(result) : [],
+            durationMs,
+            result_keys: result && typeof result === "object" ? Object.keys(result) : [],
           },
           502,
         );
@@ -264,6 +253,7 @@ export default {
 
       return json({
         text,
+        durationMs,
         provider: "cloudflare-workers-ai",
         model: "@cf/zai-org/glm-4.7-flash",
         source: {
@@ -272,6 +262,8 @@ export default {
           pageStart,
           pageEnd,
           referenceChars: referenceText.length,
+          referenceTruncated,
+          durationMs,
         },
       });
     } catch (error) {
@@ -280,6 +272,7 @@ export default {
           error: "تعذر تنفيذ الطلب عبر Workers AI.",
           code: "workers_ai_error",
           message: String(error?.message || error || "Unknown error"),
+          durationMs: Date.now() - startedAt,
         },
         502,
       );

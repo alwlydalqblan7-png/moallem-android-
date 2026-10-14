@@ -32,9 +32,12 @@ import {
   CalendarDays,
   Copy,
   RefreshCw,
+  Bell,
 } from "lucide-react";
 import { Printer } from "@capgo/capacitor-printer";
+import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
+import { LocalNotifications } from "@capacitor/local-notifications";
 import "./styles.css";
 import moallemIcon from "./assets/moallem-icon.png";
 import * as pdfjsLib from "pdfjs-dist";
@@ -152,6 +155,46 @@ const deletePdfBlob = async (id) => {
   });
   db.close();
 };
+const listPdfBlobs = async () => {
+  const db = await openPdfDb();
+  const entries = await new Promise((resolve, reject) => {
+    const tx = db.transaction(PDF_STORE, "readonly");
+    const store = tx.objectStore(PDF_STORE);
+    const values = store.getAll();
+    const keys = store.getAllKeys();
+    tx.oncomplete = () => resolve(keys.result.map((key, i) => ({ id: String(key), blob: values.result[i] })));
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+  return entries;
+};
+const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = () => reject(reader.error);
+  reader.readAsDataURL(blob);
+});
+const dataUrlToBlob = (value) => {
+  const [head, data] = String(value).split(",");
+  const mime = head.match(/data:([^;]+)/)?.[1] || "application/pdf";
+  const binary = atob(data || "");
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+};
+const replacePdfBlobs = async (pdfs) => {
+  const db = await openPdfDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(PDF_STORE, "readwrite");
+    const store = tx.objectStore(PDF_STORE);
+    store.clear();
+    for (const pdf of pdfs) if (pdf?.id && typeof pdf.data === "string") store.put(dataUrlToBlob(pdf.data), String(pdf.id));
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error("تعذرت استعادة ملفات PDF"));
+  });
+  db.close();
+};
 
 
 const extractAiText = (data) => {
@@ -188,6 +231,7 @@ const extractPdfText = async (bookId, startPage = 1, endPage = startPage) => {
   const pdf = await pdfjsLib.getDocument({ data }).promise;
   const from = Math.max(1, Number(startPage) || 1);
   const to = Math.min(pdf.numPages, Math.max(from, Number(endPage) || from));
+  if (to - from + 1 > 8) throw new Error("اختر نطاقاً لا يتجاوز 8 صفحات في كل طلب حتى لا تتأخر الخدمة.");
   const pages = [];
   for (let pageNumber = from; pageNumber <= to; pageNumber++) {
     const page = await pdf.getPage(pageNumber);
@@ -199,41 +243,91 @@ const extractPdfText = async (bookId, startPage = 1, endPage = startPage) => {
       .trim();
     pages.push(`الصفحة ${pageNumber}\n${text}`);
   }
+  const fullText = pages.join("\n\n");
   return {
     pageCount: pdf.numPages,
     startPage: from,
     endPage: to,
-    text: pages.join("\n\n"),
+    text: fullText.slice(0, 18000),
+    truncated: fullText.length > 18000,
   };
 };
 
 function App() {
-  const [schoolSettings, setSchoolSettings] = useState(() => load("m2_school_settings", { teacher:"", principal:"", school:"", directorate:"", year:"2026 - 2027" }));
+  const [schoolSettings, setSchoolSettings] = useState(() => load("m2_school_settings", { teacher:"", principal:"", school:"", directorate:"", year:"2026 - 2027", signature:"" }));
   const [periodSettings, setPeriodSettings] = useState(() => load("m2_period_settings", [
     ["08:00","08:40"],["08:40","09:20"],["09:20","10:00"],["10:15","10:55"],
     ["10:55","11:35"],["11:50","12:25"],["12:25","13:00"]
   ]));
   const [soundSettings, setSoundSettings] = useState(() => load("m2_sound_settings", {enabled:false,start:true,end:true}));
+  const [notificationMessage, setNotificationMessage] = useState("");
   useEffect(() => persist("m2_school_settings",schoolSettings),[schoolSettings]);
   useEffect(() => persist("m2_period_settings",periodSettings),[periodSettings]);
   useEffect(() => persist("m2_sound_settings",soundSettings),[soundSettings]);
-  const exportSettingsBackup = () => {
+  const scheduleClassNotifications = async () => {
+    if (!Capacitor.isNativePlatform()) { setNotificationMessage("تنبيهات الخلفية متاحة في نسخة Android فقط."); return; }
+    try {
+      const pendingIds = Array.from({length: 500}, (_, i) => ({id: 260000 + i}));
+      if (!soundSettings.enabled || (!soundSettings.start && !soundSettings.end)) {
+        await LocalNotifications.cancel({notifications: pendingIds});
+        setNotificationMessage("أُوقفت تنبيهات الحصص.");
+        return;
+      }
+      let permission = await LocalNotifications.checkPermissions();
+      if (permission.display !== "granted") permission = await LocalNotifications.requestPermissions();
+      if (permission.display !== "granted") { setNotificationMessage("لم يُسمح للتطبيق بإظهار التنبيهات."); return; }
+      let exactAlarmsAllowed = true;
+      if (Capacitor.getPlatform() === "android") {
+        let exactSetting = await LocalNotifications.checkExactNotificationSetting();
+        if (exactSetting.exact_alarm !== "granted") exactSetting = await LocalNotifications.changeExactNotificationSetting();
+        exactAlarmsAllowed = exactSetting.exact_alarm === "granted";
+      }
+      await LocalNotifications.cancel({notifications: pendingIds});
+      const notifications = [];
+      const days = [1, 2, 3, 4, 5]; // الأحد إلى الخميس في تقويم Android
+      days.forEach((weekday, dayIndex) => periodSettings.forEach((times, periodIndex) => {
+        [["start", times?.[0], "بداية"], ["end", times?.[1], "نهاية"]].forEach(([key, time, label], eventIndex) => {
+          if (!soundSettings[key] || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time || "")) return;
+          const [hour, minute] = time.split(":").map(Number);
+          notifications.push({
+            id: 260000 + dayIndex * 100 + periodIndex * 2 + eventIndex,
+            title: `تنبيه ${label} الحصة ${periodIndex + 1}`,
+            body: `${label} الحصة ${periodIndex + 1} — ${WEEK_DAYS[dayIndex]}`,
+            schedule: { on: { weekday, hour, minute }, allowWhileIdle: true },
+            sound: "default",
+            channelId: "moallem-class-bells",
+          });
+        });
+      }));
+      if (!notifications.length) { setNotificationMessage("أدخل أوقاتاً صحيحة للحصص وفعّل بداية الحصة أو نهايتها."); return; }
+      await LocalNotifications.createChannel({id:"moallem-class-bells",name:"تنبيهات الحصص",description:"بداية الحصة ونهايتها",importance:5,sound:"default",visibility:1});
+      await LocalNotifications.schedule({notifications});
+      setNotificationMessage(`تمت جدولة ${notifications.length} تنبيهاً أسبوعياً.${exactAlarmsAllowed ? "" : " لم يُسمح بالتنبيه الدقيق؛ قد يتأخر بعضها وفق إدارة النظام."}`);
+    } catch (error) { setNotificationMessage(error?.message || "تعذرت جدولة التنبيهات."); }
+  };
+  const exportSettingsBackup = async () => {
     const data = {};
     for(let i=0;i<localStorage.length;i++){
       const key=localStorage.key(i);
       if(key?.startsWith("m2_")) data[key]=localStorage.getItem(key);
     }
-    const blob=new Blob([JSON.stringify({format:"moallem-backup-v1",createdAt:new Date().toISOString(),data},null,2)],{type:"application/json"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");a.href=url;a.download="moallem-backup-"+new Date().toISOString().slice(0,10)+".json";a.click();
-    setTimeout(()=>URL.revokeObjectURL(url),2000);
+    try {
+      const pdfs = await Promise.all((await listPdfBlobs()).map(async ({id, blob}) => ({id, data: await blobToDataUrl(blob)})));
+      const blob=new Blob([JSON.stringify({format:"moallem-backup-v2",createdAt:new Date().toISOString(),data,pdfs},null,2)],{type:"application/json"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");a.href=url;a.download="moallem-backup-"+new Date().toISOString().slice(0,10)+".json";a.click();
+      setTimeout(()=>URL.revokeObjectURL(url),2000);
+    } catch (err) { window.alert(err?.message || "تعذر إنشاء النسخة الاحتياطية"); }
   };
   const importSettingsBackup = async (file) => {
     if(!file)return;
     try {
       const backup=JSON.parse(await file.text());
-      if(backup?.format!=="moallem-backup-v1"||!backup.data||typeof backup.data!=="object")throw new Error("ملف النسخة غير صالح");
-      if(!window.confirm("استعادة النسخة ستستبدل بيانات التطبيق الحالية. هل أنت متأكد؟"))return;
+      if(!["moallem-backup-v1","moallem-backup-v2"].includes(backup?.format)||!backup.data||typeof backup.data!=="object")throw new Error("ملف النسخة غير صالح");
+      if(!window.confirm(`ستستبدل الاستعادة بيانات التطبيق الحالية${backup.format==="moallem-backup-v2"?` وتستعيد ${backup.pdfs?.length||0} ملف PDF`:""}. هل أنت متأكد؟`))return;
+      if (backup.format === "moallem-backup-v2" && Array.isArray(backup.pdfs)) {
+        await replacePdfBlobs(backup.pdfs);
+      }
       for(const [key,value] of Object.entries(backup.data)){
         if(key.startsWith("m2_")&&typeof value==="string")localStorage.setItem(key,value);
       }
@@ -285,7 +379,7 @@ function App() {
   const [plannerPeriods, setPlannerPeriods] = useState(3);
   const [plannerHolidays, setPlannerHolidays] = useState("");
   const [plannerTocStart, setPlannerTocStart] = useState(1);
-  const [plannerTocEnd, setPlannerTocEnd] = useState(12);
+  const [plannerTocEnd, setPlannerTocEnd] = useState(8);
   const [plannerGenerating, setPlannerGenerating] = useState(false);
   const [bookStartPage, setBookStartPage] = useState(1);
   const [bookEndPage, setBookEndPage] = useState(1);
@@ -696,7 +790,7 @@ function App() {
         "https://moallem-ai.liondangerous65.workers.dev/api/ai"
       ).trim();
       const promptText = `أنت مخطط منهاج للمدرس وفق الكتاب المدرسي السوري المرفق نصه أدناه.
-ممنوع اختراع أسماء وحدات أو دروس غير موجودة في النص.
+ممنوع اختراع أسماء وحدات أو دروس غير موجودة في النص.${extracted.truncated ? " تنبيه: تم اختصار النص المرجعي عند حد حجم الطلب؛ صرّح بذلك ولا تستنتج من الصفحات التي لم يصل نصها." : ""}
 
 الصف: ${plannerBook.grade}
 المادة: ${plannerBook.subject}
@@ -795,6 +889,7 @@ ${extracted.text}
     setAiError("");
     setLibraryMessage("جاري قراءة صفحات الكتاب...");
     let extractedTextForFallback = "";
+    let aiTimeout;
     try {
       const extracted = await extractPdfText(
         plannerBook.id,
@@ -807,40 +902,13 @@ ${extracted.text}
         );
       extractedTextForFallback = extracted.text;
       const lessonName = bookLessonTitle.trim() || "الدرس المحدد";
-      const promptText = `أنت مساعد معلم للمنهاج السوري.
-اعتمد حصراً على نص الكتاب المرفق أدناه، ولا تضف معلومات أو دروس غير موجودة فيه.
-
-الصف: ${plannerBook.grade}
-الشعبة: ${section}
-المادة: ${preparationSubject}
-اسم الكتاب الظاهر: ${plannerBook.title}
-اسم ملف PDF الحقيقي: ${plannerBook.fileName || plannerBook.title}
-تصنيف الكتاب في المكتبة: ${plannerBook.subject}${plannerBook.branch ? ` / ${plannerBook.branch}` : ""}
-عنوان الدرس/الوحدة: ${lessonName}
-التاريخ: ${lessonDate}
-الصفحات: ${extracted.startPage} إلى ${extracted.endPage}
-
-أنشئ تحضيراً وفق صورة نموذج تخطيط وتحضير الدروس الرسمي للعام 2026-2027. استخدم العناوين الحرفية التالية كلّاً في سطر مستقل: التهيئة، الأهداف التعليمية، سير الدرس، التقويم المرحلي، التقويم النهائي، الإغلاق والتغذية الراجعة. اكتب تحت كل عنوان المحتوى الخاص به من نص الكتاب حصراً. ثم أضف طرائق التدريس والاستراتيجيات، وموارد التعلم والوسائل التعليمية. لا تكرر المعلومات بين الأقسام. التفاصيل المطلوبة:
-1) المعلومات العامة: المادة، الصف، الشعبة، عنوان الدرس/الوحدة، التاريخ، اسم الكتاب والصفحات.
-2) النواتج والمخرجات التعليمية: أهداف سلوكية/معرفية واضحة وقابلة للقياس ومناسبة لطبيعة المادة. في الفقه والتفسير والحديث واللغة العربية صغها بما يلائم طبيعة المادة، وفي العلوم أدرج الفهم والتطبيق والملاحظة والاستنتاج عند ملاءمتها للنص.
-3) الاستراتيجيات والأنشطة التعليمية التعلمية: اختر ما يلائم الدرس مثل العصف الذهني، الحوار والمناقشة، التعلم النشط، التعلم التعاوني، والنشاط أو التجربة العملية عندما يدعمها محتوى الكتاب.
-4) الوسائل والتقنيات التعليمية: الكتاب المدرسي، السبورة، والعروض أو الصور أو الأدوات أو المصادر الإثرائية المناسبة دون افتراض توفر وسيلة غير لازمة.
-5) سير الدرس: تمهيد، عرض وشرح منظم خطوة بخطوة، المفاهيم الأساسية، الأنشطة والتطبيق، وتوزيع زمن الحصة/الحصص بصورة عملية.
-6) التقويم المرحلي: أسئلة أو تطبيقات موزعة أثناء الدرس لقياس تحقق النواتج، مع إجابات/مؤشرات إجابة مختصرة عند الحاجة.
-7) التقويم النهائي: أسئلة أو مهمة ختامية تقيس تحقق النواتج فعلاً، مع الإجابات أو معايير التصحيح.
-8) الواجب المنزلي والملاحظات: واجب مرتبط مباشرة بالدرس، ثم ملاحظات عملية للمعلم.
-9) أسئلة داعمة من محتوى الدرس عند ملاءمتها: أسئلة شفهية، اختيار من متعدد، صح/خطأ مع التصحيح، وأسئلة تفكير واستنتاج. لا تفرض عدداً مصطنعاً إذا كان النص لا يدعمه.
-10) ملخص سريع للدرس يصلح للمراجعة.
-
-قواعد إلزامية: اجعل نص الكتاب المصدر الأساسي للتحضير. لا تخترع حقائق أو تجارب أو أحكاماً غير موجودة أو غير مدعومة بالنص. اجعل التحضير عملياً وقابلاً للتعديل والحفظ والطباعة داخل تطبيق معلّم. إذا كان جزء من المطلوب غير واضح في الصفحات فاذكر ذلك صراحة بدلاً من اختلاق المحتوى.
-
-لا تخلط مادة ${preparationSubject} مع أي فرع آخر من العلوم العامة.`;
+      const promptText = `أنشئ تحضير درس عربي عملياً وفق نموذج 2026–2027. اتبع عناوين مستقلة: التهيئة، الأهداف التعليمية القابلة للقياس، طرائق التدريس والاستراتيجيات، موارد التعلم والوسائل التعليمية، سير الدرس، التقويم المرحلي، التقويم النهائي، الواجب المنزلي والملاحظات، الإغلاق والتغذية الراجعة، ملخص الدرس، أسئلة داعمة عند ملاءمتها. اعتمد حصراً على نص الكتاب المرجعي المرفق، وافصل مادة ${preparationSubject} عن فروع العلوم الأخرى. لا تخترع معلومة أو تجربة؛ اذكر بوضوح ما لا يدعمه النص. بيانات الدرس: الصف ${plannerBook.grade}، الشعبة ${section}، المادة ${preparationSubject}، العنوان ${lessonName}، التاريخ ${lessonDate}، الصفحات ${extracted.startPage}-${extracted.endPage}.`;
       const endpoint = (
         import.meta.env.VITE_AI_API_URL ||
         "https://moallem-ai.liondangerous65.workers.dev/api/ai"
       ).trim();
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 120000);
+      aiTimeout = setTimeout(() => controller.abort(), 150000);
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -862,12 +930,12 @@ ${extracted.text}
             pageEnd: extracted.endPage,
             totalPages: extracted.pageCount,
             task: "lesson_preparation",
+            referenceTruncated: extracted.truncated,
           },
         }),
         signal: controller.signal,
       });
       const raw = await response.text();
-      clearTimeout(timer);
       let data = {};
       try {
         data = raw ? JSON.parse(raw) : {};
@@ -875,7 +943,7 @@ ${extracted.text}
         data = { text: raw };
       }
       if (!response.ok) {
-        const detail = data?.message || data?.code || "";
+        const detail = [data?.message || data?.code, Number.isFinite(data?.durationMs) ? `زمن الخادم ${Math.round(data.durationMs / 1000)} ثانية` : ""].filter(Boolean).join(" · ");
         throw new Error(
           `${data?.error || `خطأ من الخادم (${response.status})`}${detail ? ` — ${detail}` : ""}`,
         );
@@ -890,8 +958,9 @@ ${extracted.text}
       setAiResult(String(text));
       setAiPrompt(`تحضير من كتاب ${plannerBook.title} — ${lessonName}`);
       setLibraryMessage(
-        `تم تحضير ${lessonName} من الصفحات ${extracted.startPage}-${extracted.endPage}.`,
+        `تم تحضير ${lessonName} من الصفحات ${extracted.startPage}-${extracted.endPage} وحُفظ تلقائياً في التحاضير ودفتر السبورة.${extracted.truncated ? " تنبيه: اختُصر نص المصدر عند 18,000 محرف." : ""}${data?.durationMs ? ` زمن الخدمة: ${Math.round(data.durationMs / 1000)} ث.` : ""}`,
       );
+      saveCurrentPreparation(String(text), lessonName);
       setTab("ai");
     } catch (err) {
       const message =
@@ -929,6 +998,7 @@ ${sourceExcerpt}
         setLibraryMessage(message);
       }
     } finally {
+      clearTimeout(aiTimeout);
       setAiLoading(false);
     }
   };
@@ -937,15 +1007,21 @@ ${sourceExcerpt}
     return Number.isNaN(d.getTime()) ? "" : new Intl.DateTimeFormat("ar-SY",{weekday:"long"}).format(d);
   };
   const boardSummary = (content) => {
-    const lines=String(content||"").split(/\\n/).map(x=>x.trim()).filter(Boolean);
-    const headings=/^(?:الأهداف|نواتج|التهيئة|المفاهيم|سير الدرس|الشرح|الأنشطة|التقويم|الواجب|الخلاصة|ملخص)/;
-    const selected=lines.filter(line=>headings.test(line.replace(/^[\\d٠-٩]+[.)-]?\\s*/,"")));
-    return (selected.length?selected:lines).slice(0,16).join("\\n").slice(0,3500);
+    const lines = String(content || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    const heading = /^(?:الأهداف|نواتج|التهيئة|المفاهيم|سير الدرس|الشرح|الأنشطة|التقويم|الواجب|الخلاصة|ملخص)/;
+    const chosen = [];
+    let sectionLines = 0;
+    for (const line of lines) {
+      if (heading.test(line.replace(/^[\d٠-٩]+[.)-]?\s*/, ""))) { chosen.push(line); sectionLines = 0; }
+      else if (chosen.length && sectionLines < 2) { chosen.push(`• ${line}`); sectionLines++; }
+      if (chosen.length >= 20) break;
+    }
+    return (chosen.length ? chosen : lines.slice(0, 12)).join("\n").slice(0, 2400);
   };
   const printBoardPreparation = (item) => {
     const esc = escapePrint;
     const content = item.boardOverride ?? boardSummary(item.content);
-    printDocument(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
+    printDocument(`تحضير السبورة — ${item.title}`, `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
       body{font-family:Arial,sans-serif;padding:25px;color:#142b3d}
       h1{text-align:center;border-bottom:3px solid #193f64;padding-bottom:12px}
       .meta{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px;border:1px solid #aaa;border-radius:8px}
@@ -956,9 +1032,9 @@ ${sourceExcerpt}
       <div>المادة: ${esc(item.subject)}</div><div>الدرس: ${esc(item.title)}</div>
       </div><div class="lesson">${esc(content)}</div></body></html>`);
   };
-  const saveCurrentPreparation = () => {
-    if (!aiResult.trim()) return;
-    const title = (bookLessonTitle || aiPrompt || "تحضير درس").trim();
+  const saveCurrentPreparation = (content = aiResult, titleOverride = "") => {
+    if (!String(content || "").trim()) return;
+    const title = (titleOverride || bookLessonTitle || aiPrompt || "تحضير درس").trim();
     const item = {
       id: editingPreparationId || Date.now(),
       title,
@@ -971,7 +1047,7 @@ ${sourceExcerpt}
       bookTitle: plannerBook?.title || "",
       pageStart: bookStartPage,
       pageEnd: bookEndPage,
-      content: aiResult,
+      content: String(content),
       boardOverride: savedPreparations.find(v=>v.id===editingPreparationId)?.boardOverride ?? null,
       updatedAt: new Date().toISOString(),
     };
@@ -1013,13 +1089,16 @@ ${sourceExcerpt}
         ),
       );
   };
+  const updateBoardCopy = (id, text) => setSavedPreparations((items) => items.map((item) => item.id === id ? { ...item, boardOverride: text, updatedAt: new Date().toISOString() } : item));
+  const useAutomaticBoardCopy = (id) => setSavedPreparations((items) => items.map((item) => item.id === id ? { ...item, boardOverride: null, updatedAt: new Date().toISOString() } : item));
   // The official notebook uses a ruled planning table. Preserve legacy free-text preparations.
   const buildPreparationHtml = (item) => {
     const safe = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-    const content = safe(item.content || "");
+    const content = String(item.content || "");
     const lines = content.split(/\n/);
     const section = (heading, nextHeading) => {
-      const start = lines.findIndex((line) => line.includes(heading));
+      const headings = Array.isArray(heading) ? heading : [heading];
+      const start = lines.findIndex((line) => headings.some(name => line.includes(name)));
       if (start < 0) return "";
       let end = lines.length;
       for (let i = start + 1; i < lines.length; i++) {
@@ -1027,12 +1106,19 @@ ${sourceExcerpt}
       }
       return lines.slice(start + 1, end).join("\n").trim();
     };
+    const allSections = ["طرائق التدريس", "الاستراتيجيات", "موارد التعلم", "الوسائل التعليمية", "التهيئة", "الأهداف التعليمية", "سير الدرس", "التقويم المرحلي", "التقويم النهائي", "الواجب", "الملاحظات", "الإغلاق", "ملخص", "أسئلة داعمة"];
+    const strategies = section(["طرائق التدريس", "الاستراتيجيات"], allSections);
+    const resources = section(["موارد التعلم", "الوسائل التعليمية"], allSections);
     const prep = section("التهيئة", ["الأهداف التعليمية", "سير الدرس", "التقويم المرحلي", "التقويم النهائي"]);
     const goals = section("الأهداف التعليمية", ["سير الدرس", "التقويم المرحلي", "التقويم النهائي"]);
     const flow = section("سير الدرس", ["التقويم المرحلي", "التقويم النهائي"]);
     const formative = section("التقويم المرحلي", ["التقويم النهائي", "الإغلاق"]);
     const finalEval = section("التقويم النهائي", ["الإغلاق", "التغذية الراجعة"]);
     const closing = section("الإغلاق", ["الواجب", "ملاحظات"]);
+    const homework = section("الواجب", ["ملاحظات", "ملخص", "أسئلة داعمة"]);
+    const notes = section("الملاحظات", ["ملخص", "أسئلة داعمة"]);
+    const summary = section("ملخص", ["أسئلة داعمة"]);
+    const supportingQuestions = section("أسئلة داعمة", []);
     const hasSections = [goals, flow, formative, finalEval].some(Boolean);
     const cell = (value) => safe(value).replace(/\n/g, "<br>");
     return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
@@ -1041,20 +1127,27 @@ ${sourceExcerpt}
       th,.tint{background:#eee9d8}th{text-align:center}.meta td{width:50%}.block{border:1px solid #888;padding:8px;min-height:45px}
       .label{font-weight:bold;background:#eee9d8;padding:5px 8px;border:1px solid #888;border-bottom:0;margin-top:9px}
       .planning td{height:220px;white-space:pre-wrap}.legacy{white-space:pre-wrap;font:inherit;line-height:1.7}
-      .small{font-size:11px}.foot{margin-top:8px;text-align:left;font-size:10px}
+      .small{font-size:11px}.foot{margin-top:8px;text-align:left;font-size:10px}.signature{display:flex;justify-content:space-between;gap:15px;margin-top:22px}.signature img{display:block;height:58px;max-width:180px;object-fit:contain}
       </style></head><body>
       <h1>نموذج تخطيط وتحضير الدروس</h1>
-      <table class="meta"><tr><td><b>الصف والشعبة:</b> ${safe(item.grade)} / ${safe(item.section)}</td><td><b>المادة:</b> ${safe(item.subject)}</td></tr>
+      <table class="meta"><tr><td><b>المدرسة:</b> ${safe(schoolSettings.school)}</td><td><b>مديرية التربية:</b> ${safe(schoolSettings.directorate)}</td></tr>
+      <tr><td><b>المعلم:</b> ${safe(schoolSettings.teacher)}</td><td><b>المدير:</b> ${safe(schoolSettings.principal)}</td></tr>
+      <tr><td><b>العام الدراسي:</b> ${safe(schoolSettings.year)}</td><td><b>الصف والشعبة:</b> ${safe(item.grade)} / ${safe(item.section)}</td></tr>
+      <tr><td><b>المادة:</b> ${safe(item.subject)}</td><td></td></tr>
       <tr><td><b>الموضوع:</b> ${safe(item.title)}</td><td><b>التاريخ:</b> ${safe(item.lessonDate)} &nbsp; <b>الحصة:</b> ${safe(item.period || "")}</td></tr></table>
-      <div class="label">طرائق التدريس والاستراتيجيات</div><div class="block">${cell(item.strategies || "")}</div>
-      <div class="label">موارد التعلم والوسائل التعليمية</div><div class="block">${cell(item.resources || "")}</div>
+      <div class="label">طرائق التدريس والاستراتيجيات</div><div class="block">${cell(item.strategies || strategies)}</div>
+      <div class="label">موارد التعلم والوسائل التعليمية</div><div class="block">${cell(item.resources || resources)}</div>
       <div class="label">التهيئة — الزمن: ${safe(item.introMinutes || "")}</div><div class="block">${cell(prep)}</div>
       <table class="planning"><thead><tr><th style="width:25%">الأهداف التعليمية</th><th style="width:40%">سير الدرس</th><th style="width:25%">التقويم المرحلي</th><th style="width:10%">الزمن</th></tr></thead>
       <tbody><tr><td>${cell(goals)}</td><td>${cell(flow)}</td><td>${cell(formative)}</td><td>${safe(item.lessonMinutes || "")}</td></tr></tbody></table>
       <div class="label">التقويم النهائي</div><div class="block">${cell(finalEval)}</div>
       <div class="label">الإغلاق والتغذية الراجعة</div><div class="block">${cell(closing)}</div>
-      ${hasSections ? "" : `<div class="label">نص التحضير المحفوظ (الصيغة السابقة)</div><div class="block legacy">${content}</div>`}
+      ${(homework || notes) ? `<div class="label">الواجب المنزلي والملاحظات</div><div class="block">${cell([homework, notes].filter(Boolean).join("\n\n"))}</div>` : ""}
+      ${summary ? `<div class="label">ملخص الدرس</div><div class="block">${cell(summary)}</div>` : ""}
+      ${supportingQuestions ? `<div class="label">أسئلة داعمة</div><div class="block">${cell(supportingQuestions)}</div>` : ""}
+      ${hasSections ? "" : `<div class="label">نص التحضير المحفوظ (الصيغة السابقة)</div><div class="block legacy">${safe(content)}</div>`}
       <div class="foot">${item.bookTitle ? `المصدر: ${safe(item.bookTitle)}` : ""} ${item.pageStart ? `— الصفحات ${safe(item.pageStart)}–${safe(item.pageEnd)}` : ""}</div>
+      <div class="signature"><div><b>توقيع المعلم:</b>${schoolSettings.signature ? `<img alt="توقيع المعلم" src="${safe(schoolSettings.signature)}">` : " ........................................"}</div><div><b>توقيع المدير:</b> ........................................</div></div>
       </body></html>`;
   };
   const printPreparation = (item) =>
@@ -2159,6 +2252,22 @@ ${sourceExcerpt}
                 )}
               </section>
             )}
+            {tab === "board" && (
+              <section className="panel board-panel">
+                <div className="panelhead"><div><span className="eyebrow">التحاضير المرتبطة</span><h2>دفتر السبورة</h2><p>يُنشأ الدرس تلقائياً مع التحضير المحفوظ. النسخة المخصصة تبقى مستقلة عند تحديث التحضير.</p></div></div>
+                {savedPreparations.length === 0 ? <div className="empty-state">ستظهر تحاضير السبورة هنا بعد إنشاء تحضير عام.</div> : savedPreparations.map(item => (
+                  <article className="board-entry" key={item.id}>
+                    <div className="board-meta"><strong>{item.title}</strong><span>اليوم: {boardDayName(item.lessonDate)} · التاريخ: {item.lessonDate || "—"}</span><span>الصف {item.grade} · الشعبة {item.section} · {item.subject}</span></div>
+                    <label>النقاط الأساسية على السبورة<textarea dir="rtl" value={item.boardOverride ?? boardSummary(item.content)} onChange={e => updateBoardCopy(item.id, e.target.value)} /></label>
+                    <div className="actions">
+                      <button onClick={() => printBoardPreparation(item)}><PrinterIcon size={15}/> طباعة تحضير السبورة</button>
+                      {item.boardOverride != null && <button onClick={() => useAutomaticBoardCopy(item.id)}>استعادة النقاط التلقائية</button>}
+                      <button onClick={() => openPreparation(item)}><FolderOpen size={15}/> فتح التحضير العام</button>
+                    </div>
+                  </article>
+                ))}
+              </section>
+            )}
             {tab === "settings" && (
               <section className="panel">
                 <div className="panelhead">
@@ -2176,6 +2285,8 @@ ${sourceExcerpt}
                     <input style={{display:"block",width:"100%",marginTop:5}} value={schoolSettings[key]||""}
                       onChange={e=>setSchoolSettings(v=>({...v,[key]:e.target.value}))}/>
                   </label>)}
+                  <h4>توقيع المعلم</h4>
+                  <SignaturePad value={schoolSettings.signature || ""} onChange={signature=>setSchoolSettings(v=>({...v,signature}))}/>
                   <p className="note">تُحفظ البيانات تلقائياً على هذا الجهاز.</p>
                 </div>
                 <div className="config">
@@ -2193,11 +2304,13 @@ ${sourceExcerpt}
                   ].map(([key,label])=><label key={key} style={{display:"block",margin:"12px 0"}}>
                     <input type="checkbox" checked={Boolean(soundSettings[key])} onChange={e=>setSoundSettings(v=>({...v,[key]:e.target.checked}))}/> {label}
                   </label>)}
-                  <p className="note">هذه إعدادات محفوظة للتنبيه؛ تشغيل التنبيهات تلقائياً في الخلفية غير مفعّل بعد.</p>
+                  <button type="button" className="primary" onClick={scheduleClassNotifications}><Bell size={16}/> جدولة تنبيهات الأسبوع</button>
+                  {notificationMessage && <p className="note" role="status">{notificationMessage}</p>}
+                  <p className="note">تُجدول التنبيهات محلياً في Android وتعمل والتطبيق مغلق. قد يؤخر وضع توفير الطاقة الإشعارات، وقد يتطلب Android 12+ السماح بالتنبيهات الدقيقة من إعدادات النظام.</p>
                 </div>
                 <div className="config">
                   <h3>النسخ الاحتياطي</h3>
-                  <p className="note">النسخة الحالية تحفظ بيانات الطلاب والعلامات والتحاضير والإعدادات المخزنة محلياً. ملفات الكتب PDF نفسها غير مشمولة؛ احتفظ بنسخ منها منفصلة.</p>
+                  <p className="note">تشمل النسخة بيانات الطلاب والعلامات والتحاضير والإعدادات وتوقيع المعلم وملفات الكتب PDF. قد يكون الملف كبيراً عند وجود كتب كثيرة.</p>
                   <button type="button" onClick={exportSettingsBackup}>تنزيل نسخة احتياطية</button>
                   <label style={{display:"block",marginTop:14}}>استعادة نسخة احتياطية
                     <input type="file" accept=".json,application/json" onChange={e=>importSettingsBackup(e.target.files?.[0])}/>
@@ -2262,6 +2375,10 @@ ${sourceExcerpt}
             <Bot />
             <span>الذكاء</span>
           </button>
+          <button className={tab === "board" ? "active" : ""} onClick={() => setTab("board")}>
+            <BookOpen />
+            <span>السبورة</span>
+          </button>
           <button
             className={tab === "settings" ? "active" : ""}
             onClick={() => setTab("settings")}
@@ -2273,6 +2390,51 @@ ${sourceExcerpt}
       )}
     </div>
   );
+}
+function SignaturePad({ value, onChange }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ratio = window.devicePixelRatio || 1;
+    const width = Math.max(280, canvas.clientWidth || 320);
+    const height = 150;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    const context = canvas.getContext("2d");
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    if (value) {
+      const image = new Image();
+      image.onload = () => context.drawImage(image, 0, 0, width, height);
+      image.src = value;
+    }
+  }, [value]);
+  const point = event => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {x: event.clientX - rect.left, y: event.clientY - rect.top};
+  };
+  const begin = event => {
+    const canvas = event.currentTarget;
+    canvas.setPointerCapture(event.pointerId);
+    drawing.current = true;
+    const context = canvas.getContext("2d");
+    const p = point(event);
+    context.beginPath(); context.moveTo(p.x, p.y); context.lineWidth = 2.5; context.lineCap = "round"; context.lineJoin = "round"; context.strokeStyle = "#173653";
+  };
+  const move = event => {
+    if (!drawing.current) return;
+    const p = point(event); const context = event.currentTarget.getContext("2d");
+    context.lineTo(p.x, p.y); context.stroke();
+  };
+  const finish = event => {
+    if (!drawing.current) return;
+    drawing.current = false;
+    onChange(event.currentTarget.toDataURL("image/png"));
+  };
+  const clear = () => { const canvas = canvasRef.current; const context = canvas.getContext("2d"); context.clearRect(0, 0, canvas.clientWidth, 150); onChange(""); };
+  return <div className="signature-pad"><canvas ref={canvasRef} aria-label="ارسم توقيع المعلم بالإصبع" onPointerDown={begin} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish}/><div><span>ارسم التوقيع داخل الإطار</span><button type="button" onClick={clear}>مسح التوقيع</button></div></div>;
 }
 function Tile({ icon, title, text, onClick, tone = "blue" }) {
   return (
