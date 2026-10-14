@@ -972,7 +972,7 @@ ${extracted.text}
       setAiResult(String(text));
       setAiPrompt(`تحضير من كتاب ${plannerBook.title} — ${lessonName}`);
       setLibraryMessage(
-        `تم تحضير ${lessonName} من الصفحات ${extracted.startPage}-${extracted.endPage} وحُفظ تلقائياً في التحاضير ودفتر السبورة.${extracted.truncated ? " تنبيه: اختُصر نص المصدر عند 18,000 محرف." : ""}${data?.durationMs ? ` زمن الخدمة: ${Math.round(data.durationMs / 1000)} ث.` : ""}`,
+        `تم تحضير ${lessonName} من الصفحات ${extracted.startPage}-${extracted.endPage} وحُفظ تلقائياً في التحاضير.${extracted.truncated ? " تنبيه: اختُصر نص المصدر عند 18,000 محرف." : ""}${data?.durationMs ? ` زمن الخدمة: ${Math.round(data.durationMs / 1000)} ث.` : ""}`,
       );
       saveCurrentPreparation(String(text), lessonName);
       setTab("ai");
@@ -1016,40 +1016,12 @@ ${sourceExcerpt}
       setAiLoading(false);
     }
   };
-  const boardDayName = (date) => {
-    const d = new Date((date || new Date().toISOString().slice(0,10)) + "T12:00:00");
-    return Number.isNaN(d.getTime()) ? "" : new Intl.DateTimeFormat("ar-SY",{weekday:"long"}).format(d);
-  };
-  const boardSummary = (content) => {
-    const lines = String(content || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-    const heading = /^(?:الأهداف|نواتج|التهيئة|المفاهيم|سير الدرس|الشرح|الأنشطة|التقويم|الواجب|الخلاصة|ملخص)/;
-    const chosen = [];
-    let sectionLines = 0;
-    for (const line of lines) {
-      if (heading.test(line.replace(/^[\d٠-٩]+[.)-]?\s*/, ""))) { chosen.push(line); sectionLines = 0; }
-      else if (chosen.length && sectionLines < 2) { chosen.push(`• ${line}`); sectionLines++; }
-      if (chosen.length >= 20) break;
-    }
-    return (chosen.length ? chosen : lines.slice(0, 12)).join("\n").slice(0, 2400);
-  };
-  const printBoardPreparation = (item) => {
-    const esc = escapePrint;
-    const content = item.boardOverride ?? boardSummary(item.content);
-    printDocument(`تحضير السبورة — ${item.title}`, `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
-      body{font-family:Arial,sans-serif;padding:25px;color:#142b3d}
-      h1{text-align:center;border-bottom:3px solid #193f64;padding-bottom:12px}
-      .meta{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px;border:1px solid #aaa;border-radius:8px}
-      .lesson{white-space:pre-wrap;font-size:19px;line-height:2;border:1px solid #bbb;padding:18px;margin-top:18px;min-height:350px}
-      </style></head><body><h1>تحضير السبورة</h1><div class="meta">
-      <div>اليوم: ${esc(boardDayName(item.lessonDate))}</div><div>التاريخ: ${esc(item.lessonDate)}</div>
-      <div>الصف: ${esc(item.grade)}</div><div>الشعبة: ${esc(item.section)}</div>
-      <div>المادة: ${esc(item.subject)}</div><div>الدرس: ${esc(item.title)}</div>
-      </div><div class="lesson">${esc(content)}</div></body></html>`);
-  };
   const saveCurrentPreparation = (content = aiResult, titleOverride = "") => {
     if (!String(content || "").trim()) return;
     const title = (titleOverride || bookLessonTitle || aiPrompt || "تحضير درس").trim();
+    const previous = savedPreparations.find(v=>v.id===editingPreparationId) || {};
     const item = {
+      ...previous,
       id: editingPreparationId || Date.now(),
       title,
       grade,
@@ -1062,8 +1034,7 @@ ${sourceExcerpt}
       pageStart: bookStartPage,
       pageEnd: bookEndPage,
       content: String(content),
-      richContent: aiRichContent || savedPreparations.find(v=>v.id===editingPreparationId)?.richContent || autoColorHtml(content),
-      boardOverride: savedPreparations.find(v=>v.id===editingPreparationId)?.boardOverride ?? null,
+      richContent: aiRichContent || previous.richContent || autoColorHtml(content),
       updatedAt: new Date().toISOString(),
     };
     setSavedPreparations((x) => [item, ...x.filter((v) => v.id !== item.id)]);
@@ -1106,68 +1077,47 @@ ${sourceExcerpt}
         ),
       );
   };
-  const updateBoardCopy = (id, text) => setSavedPreparations((items) => items.map((item) => item.id === id ? { ...item, boardOverride: text, updatedAt: new Date().toISOString() } : item));
-  const useAutomaticBoardCopy = (id) => setSavedPreparations((items) => items.map((item) => item.id === id ? { ...item, boardOverride: null, updatedAt: new Date().toISOString() } : item));
-  // The official notebook uses a ruled planning table. Preserve legacy free-text preparations.
+  // Print one complete A4 lesson sheet, using the attached notebook page as a visual reference.
+  // Keep the saved rich HTML intact so automatic and manual text colors carry through to PDF.
   const buildPreparationHtml = (item) => {
     const safe = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-    const content = String(item.content || "");
-    const richContent = sanitizeRichHtml(item.richContent || autoColorHtml(content));
-    const lines = content.split(/\n/);
-    const section = (heading, nextHeading) => {
-      const headings = Array.isArray(heading) ? heading : [heading];
-      const start = lines.findIndex((line) => headings.some(name => line.includes(name)));
-      if (start < 0) return "";
-      let end = lines.length;
-      for (let i = start + 1; i < lines.length; i++) {
-        if (nextHeading.some((name) => lines[i].includes(name))) { end = i; break; }
-      }
-      return lines.slice(start + 1, end).join("\n").trim();
-    };
-    const allSections = ["طرائق التدريس", "الاستراتيجيات", "موارد التعلم", "الوسائل التعليمية", "التهيئة", "الأهداف التعليمية", "سير الدرس", "التقويم المرحلي", "التقويم النهائي", "الواجب", "الملاحظات", "الإغلاق", "ملخص", "أسئلة داعمة"];
-    const strategies = section(["طرائق التدريس", "الاستراتيجيات"], allSections);
-    const resources = section(["موارد التعلم", "الوسائل التعليمية"], allSections);
-    const prep = section("التهيئة", ["الأهداف التعليمية", "سير الدرس", "التقويم المرحلي", "التقويم النهائي"]);
-    const goals = section("الأهداف التعليمية", ["سير الدرس", "التقويم المرحلي", "التقويم النهائي"]);
-    const flow = section("سير الدرس", ["التقويم المرحلي", "التقويم النهائي"]);
-    const formative = section("التقويم المرحلي", ["التقويم النهائي", "الإغلاق"]);
-    const finalEval = section("التقويم النهائي", ["الإغلاق", "التغذية الراجعة"]);
-    const closing = section("الإغلاق", ["الواجب", "ملاحظات"]);
-    const homework = section("الواجب", ["ملاحظات", "ملخص", "أسئلة داعمة"]);
-    const notes = section("الملاحظات", ["ملخص", "أسئلة داعمة"]);
-    const summary = section("ملخص", ["أسئلة داعمة"]);
-    const supportingQuestions = section("أسئلة داعمة", []);
-    const hasSections = [goals, flow, formative, finalEval].some(Boolean);
-    const cell = (value) => safe(value).replace(/\n/g, "<br>");
+    const richContent = sanitizeRichHtml(item.richContent || autoColorHtml(item.content || ""));
+    const date = item.lessonDate || "";
+    const day = date ? new Intl.DateTimeFormat("ar-SY", { weekday: "long" }).format(new Date(`${date}T12:00:00`)) : "";
     return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
-      @page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,Tahoma,sans-serif;color:#222;margin:0;font-size:12px;line-height:1.55}
-      h1{text-align:center;font-size:19px;margin:0 0 10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #888;padding:7px;vertical-align:top;overflow-wrap:anywhere}
-      th,.tint{background:#eee9d8}th{text-align:center}.meta td{width:50%}.block{border:1px solid #888;padding:8px;min-height:45px}
-      .label{font-weight:bold;background:#eee9d8;padding:5px 8px;border:1px solid #888;border-bottom:0;margin-top:9px}
-      .planning td{height:220px;white-space:pre-wrap}.legacy{white-space:pre-wrap;font:inherit;line-height:1.7}
-      .small{font-size:11px}.foot{margin-top:8px;text-align:left;font-size:10px}.signature{display:flex;justify-content:space-between;gap:15px;margin-top:22px}.signature img{display:block;height:58px;max-width:180px;object-fit:contain}
-      </style></head><body>
-      <h1>دفتر التحضير</h1>
-      <table class="meta"><tr><td><b>المدرسة:</b> ${safe(schoolSettings.school)}</td><td><b>مديرية التربية:</b> ${safe(schoolSettings.directorate)}</td></tr>
-      <tr><td><b>المعلم:</b> ${safe(subjectTeachers[item.subject] || schoolSettings.teacher)}</td><td><b>المدير:</b> ${safe(schoolSettings.principal)}</td></tr>
-      <tr><td><b>العام الدراسي:</b> ${safe(schoolSettings.year)}</td><td><b>الصف والشعبة:</b> ${safe(item.grade)} / ${safe(item.section)}</td></tr>
-      <tr><td><b>المادة:</b> ${safe(item.subject)}</td><td></td></tr>
-      <tr><td><b>الموضوع:</b> ${safe(item.title)}</td><td><b>التاريخ:</b> ${safe(item.lessonDate)} &nbsp; <b>الحصة:</b> ${safe(item.period || "")}</td></tr></table>
-      ${richContent ? `<div class="label">نص التحضير</div><div class="block legacy rich-print">${richContent}</div>` : `
-      <div class="label">طرائق التدريس والاستراتيجيات</div><div class="block">${cell(item.strategies || strategies)}</div>
-      <div class="label">موارد التعلم والوسائل التعليمية</div><div class="block">${cell(item.resources || resources)}</div>
-      <div class="label">التهيئة — الزمن: ${safe(item.introMinutes || "")}</div><div class="block">${cell(prep)}</div>
-      <table class="planning"><thead><tr><th style="width:25%">الأهداف التعليمية</th><th style="width:40%">سير الدرس</th><th style="width:25%">التقويم المرحلي</th><th style="width:10%">الزمن</th></tr></thead>
-      <tbody><tr><td>${cell(goals)}</td><td>${cell(flow)}</td><td>${cell(formative)}</td><td>${safe(item.lessonMinutes || "")}</td></tr></tbody></table>
-      <div class="label">التقويم النهائي</div><div class="block">${cell(finalEval)}</div>
-      <div class="label">الإغلاق والتغذية الراجعة</div><div class="block">${cell(closing)}</div>
-      ${(homework || notes) ? `<div class="label">الواجب المنزلي والملاحظات</div><div class="block">${cell([homework, notes].filter(Boolean).join("\n\n"))}</div>` : ""}
-      ${summary ? `<div class="label">ملخص الدرس</div><div class="block">${cell(summary)}</div>` : ""}
-      ${supportingQuestions ? `<div class="label">أسئلة داعمة</div><div class="block">${cell(supportingQuestions)}</div>` : ""}
-      ${hasSections ? "" : `<div class="label">نص التحضير المحفوظ (الصيغة السابقة)</div><div class="block legacy">${safe(content)}</div>`}`}
+      @page{size:A4 portrait;margin:7mm}
+      *{box-sizing:border-box;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+      html,body{margin:0;padding:0;font-family:Arial,Tahoma,sans-serif;color:#111;direction:rtl}
+      body{font-size:11px;line-height:1.45}
+      .sheet{min-height:282mm;display:flex;flex-direction:column;border:1px solid #888;padding:5mm;break-after:page;page-break-after:always}
+      h1{text-align:center;font-size:17px;line-height:1.25;margin:0 0 3mm;color:#1769aa}
+      .school{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #777;padding:0 1mm 2mm;margin-bottom:2mm;font-size:10px}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}
+      td,th{border:1px solid #777;padding:2mm 2.4mm;vertical-align:middle;overflow-wrap:anywhere}
+      th{width:15%;background:#f2f0e8;text-align:right;color:#1769aa;font-weight:700}
+      td{height:9mm}
+      .content-title{margin-top:2mm;padding:1.8mm 2.4mm;background:#f2f0e8;border:1px solid #777;border-bottom:0;color:#1769aa;font-weight:bold}
+      .content{flex:1;min-height:170mm;border:1px solid #777;padding:3mm 4mm;line-height:1.75;overflow-wrap:anywhere;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 8.5mm,#d8d8d8 8.6mm,#d8d8d8 8.75mm);background-position:0 2mm}
+      .content p{margin:0 0 1.1em}.content h1,.content h2,.content h3,.content strong{color:inherit}
+      .foot{padding-top:2mm;font-size:9px;color:#333}
+      .signatures{display:flex;justify-content:space-between;align-items:flex-end;gap:10mm;margin-top:3mm;padding-top:2mm;border-top:1px solid #777;min-height:18mm}
+      .signature img{display:block;height:14mm;max-width:42mm;object-fit:contain;margin-top:1mm}
+      @media screen{body{background:#e8edf1;padding:12px}.sheet{background:#fff;max-width:210mm;margin:0 auto 12px;box-shadow:0 2px 8px #0002}}
+      @media print{.sheet{margin:0;box-shadow:none}}
+      </style></head><body><article class="sheet">
+      <h1>تحضير الدرس</h1>
+      <div class="school"><span>المدرسة: ${safe(schoolSettings.school)}</span><span>مديرية التربية: ${safe(schoolSettings.directorate)}</span><span>العام الدراسي: ${safe(schoolSettings.year)}</span></div>
+      <table><tbody>
+      <tr><th>المعلم</th><td>${safe(subjectTeachers[item.subject] || schoolSettings.teacher)}</td><th>المدير</th><td>${safe(schoolSettings.principal)}</td></tr>
+      <tr><th>الصف</th><td>${safe(item.grade)}</td><th>الشعبة</th><td>${safe(item.section)}</td></tr>
+      <tr><th>المادة</th><td>${safe(item.subject)}</td><th>الحصة</th><td>${safe(item.period || "")}</td></tr>
+      <tr><th>عنوان الدرس</th><td colspan="3">${safe(item.title)}</td></tr>
+      <tr><th>اليوم والتاريخ</th><td colspan="3">${safe(day)}${day && date ? " — " : ""}${safe(date)}</td></tr>
+      </tbody></table>
+      <div class="content-title">محتوى التحضير</div><div class="content">${richContent}</div>
       <div class="foot">${item.bookTitle ? `المصدر: ${safe(item.bookTitle)}` : ""} ${item.pageStart ? `— الصفحات ${safe(item.pageStart)}–${safe(item.pageEnd)}` : ""}</div>
-      <div class="signature"><div><b>توقيع المعلم:</b>${schoolSettings.signature ? `<img alt="توقيع المعلم" src="${safe(schoolSettings.signature)}">` : " ........................................"}</div><div><b>توقيع المدير:</b> ........................................</div></div>
-      </body></html>`;
+      <div class="signatures"><div class="signature"><b>توقيع المعلم:</b>${schoolSettings.signature ? `<img alt="توقيع المعلم" src="${safe(schoolSettings.signature)}">` : " ........................................"}</div><div><b>توقيع المدير:</b> ........................................</div></div>
+      </article></body></html>`;
   };
   const printPreparation = (item) =>
     printDocument(item.title, buildPreparationHtml(item));
@@ -1262,8 +1212,8 @@ ${sourceExcerpt}
     ...calc(s),
   }));
   return (
-    <div className={`app ${tab === "board" ? "board-immersive" : ""}`}>
-      {tab !== "board" && <header className="top">
+    <div className="app">
+      <header className="top">
         <div className="brand">
           <img src={moallemIcon} />
           <div>
@@ -1275,8 +1225,8 @@ ${sourceExcerpt}
           {online ? <Wifi size={16} /> : <WifiOff size={16} />}{" "}
           {online ? "متصل" : "بدون إنترنت"}
         </div>
-      </header>}
-      {!reportPreview && tab !== "board" && (
+      </header>
+      {!reportPreview && (
         <div className="classbar">
           <select value={grade} onChange={(e) => setGrade(e.target.value)}>
             {grades.map((x) => (
@@ -1295,7 +1245,7 @@ ${sourceExcerpt}
           </select>
         </div>
       )}
-      <main className={tab === "board" ? "board-main" : ""}>
+      <main>
         {reportPreview ? (
           <section className="preview-page">
             <div className="preview-toolbar">
@@ -2251,7 +2201,6 @@ ${sourceExcerpt}
                           <button onClick={() => openPreparation(item)}>
                             <FolderOpen size={15} /> فتح
                           </button>
-                          <button onClick={() => printBoardPreparation(item)}><PrinterIcon size={15} /> السبورة</button>
                           <button onClick={() => printPreparation(item)}>
                             <PrinterIcon size={15} /> طباعة
                           </button>
@@ -2266,24 +2215,6 @@ ${sourceExcerpt}
                     ))}
                   </div>
                 )}
-              </section>
-            )}
-            {tab === "board" && (
-              <section className="board-workspace">
-                <div className="board-topbar">
-                  <button onClick={() => setTab("home")}>رجوع</button>
-                  <strong>دفتر السبورة</strong>
-                  {savedPreparations.length > 0 && <select aria-label="اختيار تحضير السبورة" value={savedPreparations.some((x) => x.id === editingPreparationId) ? editingPreparationId : savedPreparations[0].id} onChange={(e) => setEditingPreparationId(Number(e.target.value))}>{savedPreparations.map((item) => <option key={item.id} value={item.id}>{item.title} — {item.subject}</option>)}</select>}
-                </div>
-                {savedPreparations.length === 0 ? <div className="empty-state">ستظهر تحاضير السبورة هنا بعد إنشاء تحضير عام.</div> : (() => {
-                  const item = savedPreparations.find((x) => String(x.id) === String(editingPreparationId)) || savedPreparations[0];
-                  return <article className="board-entry board-entry-full" key={item.id}>
-                    <div className="board-meta"><strong>{item.title}</strong><span>اليوم: {boardDayName(item.lessonDate)} · التاريخ: {item.lessonDate || "—"}</span><span>الصف {item.grade} · الشعبة {item.section} · {item.subject}</span></div>
-                    <label>النقاط الأساسية<textarea dir="rtl" value={item.boardOverride ?? boardSummary(item.content)} onChange={e => updateBoardCopy(item.id, e.target.value)} /></label>
-                    <BoardCanvas boardId={item.id} />
-                    <div className="actions"><button onClick={() => printBoardPreparation(item)}><PrinterIcon size={15}/> طباعة تحضير السبورة</button>{item.boardOverride != null && <button onClick={() => useAutomaticBoardCopy(item.id)}>استعادة النقاط التلقائية</button>}<button onClick={() => openPreparation(item)}><FolderOpen size={15}/> فتح التحضير العام</button></div>
-                  </article>;
-                })()}
               </section>
             )}
             {tab === "settings" && (
@@ -2303,7 +2234,7 @@ ${sourceExcerpt}
           </>
         )}
       </main>
-      {!reportPreview && tab !== "board" && (
+      {!reportPreview && (
         <nav className="nav">
           <button
             className={tab === "home" ? "active" : ""}
@@ -2332,10 +2263,6 @@ ${sourceExcerpt}
           >
             <Bot />
             <span>الذكاء</span>
-          </button>
-          <button className={tab === "board" ? "active" : ""} onClick={() => setTab("board")}>
-            <BookOpen />
-            <span>السبورة</span>
           </button>
           <button
             className={tab === "settings" ? "active" : ""}
@@ -2421,56 +2348,6 @@ function PreparationEditor({ text, initialHtml, onChange }) {
     notify();
   };
   return <div className="preparation-editor"><div className="prep-color-tools"><strong>لون النص المحدد:</strong><button type="button" className="prep-blue" onMouseDown={e=>e.preventDefault()} onClick={()=>paint("#1769aa")}>أزرق</button><button type="button" className="prep-red" onMouseDown={e=>e.preventDefault()} onClick={()=>paint("#d32f2f")}>أحمر</button><button type="button" className="prep-green" onMouseDown={e=>e.preventDefault()} onClick={()=>paint("#16834a")}>أخضر</button><button type="button" className="prep-black" onMouseDown={e=>e.preventDefault()} onClick={()=>paint("#111111")}>أسود</button><button type="button" onClick={automatic}>إعادة اللون التلقائي</button></div><div ref={editorRef} className="airesult editable-result rich-editor" contentEditable suppressContentEditableWarning dir="rtl" role="textbox" aria-label="نص التحضير القابل للتحرير" onInput={notify}/><p className="note">حدّد الكلمات أولاً ثم اختر لونها. تحفظ الألوان مع التحضير وتظهر في الطباعة وملف PDF.</p></div>;
-}
-function BoardCanvas({ boardId }) {
-  const canvasRef = useRef(null);
-  const drawing = useRef(false);
-  const strokesRef = useRef([]);
-  const redoRef = useRef([]);
-  const [color, setColor] = useState("#111111");
-  const [tool, setTool] = useState("pen");
-  const storageKey = `m2_board_canvas_${boardId}`;
-  const redraw = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.max(1, Math.round(rect.width * ratio));
-    canvas.height = Math.max(1, Math.round(rect.height * ratio));
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, rect.width, rect.height);
-    for (const stroke of strokesRef.current) {
-      if (!stroke.points?.length) continue;
-      ctx.beginPath();
-      ctx.lineCap = "round"; ctx.lineJoin = "round";
-      ctx.lineWidth = stroke.width || 4;
-      ctx.strokeStyle = stroke.tool === "erase" ? "#fff" : (stroke.color === "#d32f2f" ? "#d32f2f" : "#111");
-      const first = stroke.points[0];
-      ctx.moveTo(first.x * rect.width, first.y * rect.height);
-      for (const point of stroke.points.slice(1)) ctx.lineTo(point.x * rect.width, point.y * rect.height);
-      if (stroke.points.length === 1) ctx.lineTo(first.x * rect.width + 0.01, first.y * rect.height + 0.01);
-      ctx.stroke();
-    }
-  };
-  useEffect(() => {
-    try { strokesRef.current = JSON.parse(localStorage.getItem(storageKey) || "[]"); } catch { strokesRef.current = []; }
-    redoRef.current = [];
-    const observer = new ResizeObserver(redraw);
-    if (canvasRef.current) observer.observe(canvasRef.current);
-    redraw();
-    return () => observer.disconnect();
-  }, [storageKey]);
-  const saveAndDraw = () => { localStorage.setItem(storageKey, JSON.stringify(strokesRef.current)); redraw(); };
-  const point = (event) => { const r = event.currentTarget.getBoundingClientRect(); return {x:(event.clientX-r.left)/r.width,y:(event.clientY-r.top)/r.height}; };
-  const begin = (event) => { event.currentTarget.setPointerCapture(event.pointerId); drawing.current = true; strokesRef.current = [...strokesRef.current,{tool,color, width:tool === "erase" ? 30 : 4,points:[point(event)]}]; redraw(); };
-  const move = (event) => { if(!drawing.current)return; const next=strokesRef.current.slice(); const last=next[next.length-1]; next[next.length-1]={...last,points:[...last.points,point(event)]}; strokesRef.current=next; if(last.points.length % 6 === 0) localStorage.setItem(storageKey,JSON.stringify(strokesRef.current)); redraw(); };
-  const finish = () => { if(!drawing.current)return; drawing.current=false; redoRef.current=[]; localStorage.setItem(storageKey,JSON.stringify(strokesRef.current)); };
-  const undo = () => { if(!strokesRef.current.length)return; redoRef.current=[...redoRef.current,strokesRef.current.at(-1)]; strokesRef.current=strokesRef.current.slice(0,-1); saveAndDraw(); };
-  const redo = () => { if(!redoRef.current.length)return; strokesRef.current=[...strokesRef.current,redoRef.current.at(-1)]; redoRef.current=redoRef.current.slice(0,-1); saveAndDraw(); };
-  const clear = () => { strokesRef.current=[]; redoRef.current=[]; saveAndDraw(); };
-  return <div className="board-canvas-wrap"><div className="board-tools"><button className={tool==="pen"?"tool-active":""} onClick={()=>setTool("pen")}>القلم</button><button className={color==="#111111"?"color-active":""} onClick={()=>{setColor("#111111");setTool("pen");}}>أسود</button><button className={color==="#d32f2f"?"color-active red-tool":"red-tool"} onClick={()=>{setColor("#d32f2f");setTool("pen");}}>أحمر</button><button className={tool==="erase"?"tool-active":""} onClick={()=>setTool("erase")}>الممحاة</button><button onClick={undo}>تراجع</button><button onClick={redo}>إعادة</button><button onClick={clear}>مسح السبورة</button></div><canvas ref={canvasRef} className="board-canvas" aria-label="اكتب على السبورة بالإصبع" onPointerDown={begin} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish} /></div>;
 }
 function Tile({ icon, title, text, onClick, tone = "blue" }) {
   return (

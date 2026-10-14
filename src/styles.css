@@ -240,41 +240,14 @@ main{padding:11px}
 .official-schedule td textarea:focus{outline:2px solid #426f94;outline-offset:-2px;background:#faf9f3}
 .official-schedule-footer{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;background:#eee9d8;padding:14px;margin-top:12px;color:#34312b}
 
-/* Official board notebook, signature pad and six-item Arabic navigation */
-.nav{grid-template-columns:repeat(6,minmax(0,1fr))}
+/* Signature pad and five-item Arabic navigation */
+.nav{grid-template-columns:repeat(5,minmax(0,1fr))}
 .nav button{font-size:10px;padding-inline:2px}
 .nav button svg{width:19px;height:19px}
 .signature-pad{border:1px solid #dce5ec;border-radius:14px;padding:8px;background:#fbfdff}
 .signature-pad canvas{display:block;width:100%;height:150px;border:1px dashed #9fb0bd;border-radius:10px;background:#fff;touch-action:none}
 .signature-pad>div{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:7px;color:var(--muted);font-size:12px}
 .signature-pad button{border:1px solid #dce5ec;background:#fff;border-radius:10px;padding:8px 10px;color:var(--navy);font:inherit;font-weight:700}
-.board-panel{display:grid;gap:12px}
-.board-entry{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:16px;background:#fff}
-.board-meta{display:grid;gap:4px}
-.board-meta strong{font-size:17px;color:var(--navy)}
-.board-meta span{font-size:12px;color:var(--muted)}
-.board-entry label{display:grid;gap:6px;font-weight:700;color:var(--ink)}
-.board-entry textarea{width:100%;min-height:150px;border:1px solid #dce5ec;border-radius:12px;padding:12px;font:inherit;line-height:1.8;resize:vertical}
-.board-immersive{height:100dvh;min-height:100dvh;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);overflow:hidden;background:#f5f7fa}
-.board-main{height:100%;max-width:none;margin:0;padding:8px;overflow:hidden}
-.board-workspace{height:100%;display:flex;flex-direction:column;gap:8px}
-.board-topbar{display:flex;align-items:center;gap:8px;min-height:42px}
-.board-topbar strong{white-space:nowrap;color:var(--navy)}
-.board-topbar select{flex:1;min-width:0;font:inherit;border:1px solid #dce5ec;border-radius:10px;padding:9px;background:white}
-.board-topbar button,.board-tools button{min-height:40px;padding:8px 11px;border:1px solid #dce5ec;border-radius:10px;background:#fff;font:inherit;font-weight:700;color:var(--navy)}
-.board-entry-full{flex:1;min-height:0;overflow:auto;padding:8px}
-.board-entry-full .board-meta{gap:2px}
-.board-entry-full .board-meta strong{font-size:15px}
-.board-entry-full .board-meta span{font-size:11px}
-.board-entry-full label{font-size:12px}
-.board-entry-full textarea{min-height:60px;max-height:90px;padding:7px}
-.board-canvas-wrap{display:flex;flex-direction:column;flex:1;min-height:260px;gap:5px}
-.board-tools{display:flex;gap:5px;overflow-x:auto;flex:0 0 auto}
-.board-tools button{min-height:36px;padding:6px 9px;white-space:nowrap;font-size:12px}
-.board-tools .tool-active{background:#eaf4fc;border-color:#4b99ce}
-.board-tools .color-active{outline:2px solid #111}
-.board-tools .red-tool{color:#c62828}
-.board-canvas{display:block;width:100%;flex:1;min-height:210px;border:1px solid #c7d1da;border-radius:10px;background:#fff;touch-action:none}
 .settings-panel{display:grid;gap:6px}
 .settings-section{border:1px solid #e2eaf0;border-radius:14px;padding:0 12px;background:#fff}
 .settings-section>summary{cursor:pointer;list-style:none;padding:15px 28px 15px 0;font-weight:800;color:var(--navy);position:relative}
@@ -301,5 +274,5 @@ main{padding:11px}
 .rich-editor:focus{border-color:#6daed6;box-shadow:0 0 0 2px rgba(79,183,255,.13)}
 .rich-editor div{min-height:1.7em}
 .rich-print{white-space:normal;color:#111}.rich-print div{min-height:1.5em}
-@media(max-width:480px){.board-entry-full{padding:7px}.board-canvas-wrap{min-height:220px}.board-topbar strong{font-size:13px}.board-topbar button{padding-inline:8px}.period-row{grid-template-columns:1fr 1fr}.period-row>strong{grid-column:1/-1}}
+@media(max-width:480px){.period-row{grid-template-columns:1fr 1fr}.period-row>strong{grid-column:1/-1}}
 @media(max-width:390px){.nav button{font-size:9px}.nav button svg{width:17px;height:17px}}
