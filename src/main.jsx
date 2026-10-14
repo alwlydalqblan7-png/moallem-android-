@@ -268,6 +268,25 @@ function App() {
   const [weeklySchedule, setWeeklySchedule] = useState(() =>
     load("m2_weekly_schedule", {}),
   );
+  const [scheduleEffectiveDate, setScheduleEffectiveDate] = useState(() => load("m2_schedule_effective_date", ""));
+  useEffect(() => persist("m2_schedule_effective_date", scheduleEffectiveDate), [scheduleEffectiveDate]);
+  const getSchedulePeriod = (day, index) => (weeklySchedule[day] || [])[index] || null;
+  const setScheduleCell = (day, index, value) => setWeeklySchedule((previous) => {
+    const periods = [...(previous[day] || [])];
+    while (periods.length <= index) periods.push({ id: Date.now() + periods.length, grade: "", section: "", subject: "", time: "" });
+    periods[index] = { ...periods[index], note: value };
+    return { ...previous, [day]: periods };
+  });
+  const escapePrint = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const scheduleCellText = (day, index) => {
+    const period = getSchedulePeriod(day, index);
+    if (!period) return "";
+    return period.note !== undefined ? period.note : [period.subject, period.grade && `الصف ${period.grade}`, period.section && `الشعبة ${period.section}`].filter(Boolean).join(" - ");
+  };
+  const printWeeklySchedule = () => {
+    const rows = WEEK_DAYS.map((day) => `<tr><th>${day}</th>${Array.from({length: 7}, (_, i) => `<td>${escapePrint(scheduleCellText(day, i))}</td>`).join("")}</tr>`).join("");
+    printDocument("البرنامج الأسبوعي", `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>@page{size:A4 landscape;margin:12mm}body{font-family:Arial,sans-serif;color:#222}h1{text-align:center;font-size:22px}.date{background:#f0ede2;padding:12px;margin:16px 0}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #777;text-align:center;padding:10px 4px;height:64px;white-space:pre-wrap;font-size:12px}th{background:#eee9d8}footer{margin-top:20px;background:#f0ede2;padding:16px;display:flex;justify-content:space-between}</style></head><body><h1>البرنامج الأسبوعي</h1><div class="date">يعمل بهذا البرنامج اعتباراً من: ${escapePrint(scheduleEffectiveDate)}</div><table><thead><tr><th>اليوم</th>${Array.from({length:7},(_,i)=>`<th>الدرس ${i+1}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table><footer><span>ملاحظات: ....................................</span><span>اسم المدرس وتوقيعه: ....................................</span></footer></body></html>`);
+  };
   const pdfInputRef = useRef(null);
   const [reportPreview, setReportPreview] = useState(false);
   const tabRef = useRef(tab);
@@ -1207,106 +1226,31 @@ ${extracted.text}
               <section className="panel weekly-panel">
                 <div className="panelhead">
                   <div>
-                    <span className="eyebrow">البرنامج الأسبوعي</span>
-                    <h2>حصصي من الأحد إلى الخميس</h2>
-                    <p>أضف وعدّل واحذف الحصص، والحفظ تلقائي على الجهاز.</p>
+                    <span className="eyebrow">دفتر التحضير الرسمي 2026–2027</span>
+                    <h2>البرنامج الأسبوعي</h2>
+                    <p>خمسة أيام وسبع حصص لكل يوم. التعديل يُحفظ تلقائياً على جهازك.</p>
                   </div>
+                  <button className="primary" onClick={printWeeklySchedule}><PrinterIcon size={16} /> طباعة / PDF</button>
                 </div>
-                <div className="weekly-days">
-                  {WEEK_DAYS.map((day) => (
-                    <article className="weekly-day" key={day}>
-                      <div className="weekly-day-head">
-                        <div>
-                          <strong>{day}</strong>
-                          <span>{(weeklySchedule[day] || []).length} حصة</span>
-                        </div>
-                        <button
-                          className="primary"
-                          onClick={() => addWeeklyPeriod(day)}
-                        >
-                          <Plus size={16} /> إضافة حصة
-                        </button>
-                      </div>
-                      <div className="weekly-periods">
-                        {(weeklySchedule[day] || []).length ? (
-                          (weeklySchedule[day] || []).map((period, i) => (
-                            <div className="weekly-period" key={period.id}>
-                              <span className="period-num">{i + 1}</span>
-                              <select
-                                value={period.grade}
-                                onChange={(e) =>
-                                  updateWeeklyPeriod(day, period.id, {
-                                    grade: e.target.value,
-                                  })
-                                }
-                              >
-                                {grades.map((g) => (
-                                  <option key={g}>{g}</option>
-                                ))}
-                              </select>
-                              <select
-                                value={period.section}
-                                onChange={(e) =>
-                                  updateWeeklyPeriod(day, period.id, {
-                                    section: e.target.value,
-                                  })
-                                }
-                              >
-                                {sections.map((v) => (
-                                  <option key={v}>{v}</option>
-                                ))}
-                              </select>
-                              <select
-                                value={period.subject}
-                                onChange={(e) =>
-                                  updateWeeklyPeriod(day, period.id, {
-                                    subject: e.target.value,
-                                  })
-                                }
-                              >
-                                {(GENERAL_SCIENCE_GRADES.includes(period.grade)
-                                  ? subjects.filter(
-                                      (v) =>
-                                        ![
-                                          "الفيزياء",
-                                          "الكيمياء",
-                                          "علم الأحياء",
-                                          "علم الأرض",
-                                        ].includes(v),
-                                    )
-                                  : subjects
-                                ).map((v) => (
-                                  <option key={v}>{v}</option>
-                                ))}
-                              </select>
-                              <input
-                                type="time"
-                                value={period.time || ""}
-                                onChange={(e) =>
-                                  updateWeeklyPeriod(day, period.id, {
-                                    time: e.target.value,
-                                  })
-                                }
-                                aria-label={`وقت الحصة ${i + 1}`}
-                              />
-                              <button
-                                className="danger"
-                                onClick={() =>
-                                  removeWeeklyPeriod(day, period.id)
-                                }
-                                aria-label="حذف الحصة"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="weekly-empty">لا توجد حصص بعد.</div>
-                        )}
-                      </div>
-                    </article>
-                  ))}
+                <label className="schedule-date-label">يعمل بهذا البرنامج اعتباراً من:
+                  <input type="date" value={scheduleEffectiveDate} onChange={(e) => setScheduleEffectiveDate(e.target.value)} />
+                </label>
+                <div className="official-schedule-scroll">
+                  <table className="official-schedule" dir="rtl">
+                    <thead><tr><th>اليوم</th>{Array.from({length:7},(_,i)=><th key={i}>الدرس {i+1}</th>)}</tr></thead>
+                    <tbody>{WEEK_DAYS.map(day=><tr key={day}>
+                      <th>{day}</th>
+                      {Array.from({length:7},(_,i)=><td key={i}><textarea
+                        aria-label={`${day} - الدرس ${i+1}`}
+                        value={scheduleCellText(day,i)}
+                        onChange={e=>setScheduleCell(day,i,e.target.value)}
+                        rows={3}
+                      /></td>)}
+                    </tr>)}</tbody>
+                  </table>
                 </div>
+                <p className="note">الخانات القديمة تظهر تلقائياً؛ تعديل أي خانة يحفظ نصها الجديد دون حذف بيانات بقية الحصص.</p>
+                <div className="official-schedule-footer"><span>ملاحظات: ................................</span><span>اسم المدرس وتوقيعه: ................................</span></div>
               </section>
             )}
             {tab === "students" && (
