@@ -407,6 +407,12 @@ function App() {
   const [savedPreparations, setSavedPreparations] = useState(() =>
     load("m2_saved_preparations", []),
   );
+  const [knowledgeBank, setKnowledgeBank] = useState(() => load("m2_knowledge_bank", []));
+  const [knowledgeQuery, setKnowledgeQuery] = useState("");
+  const [knowledgeTypeFilter, setKnowledgeTypeFilter] = useState("الكل");
+  const [knowledgeFormOpen, setKnowledgeFormOpen] = useState(false);
+  const [editingKnowledgeId, setEditingKnowledgeId] = useState(null);
+  const [knowledgeDraft, setKnowledgeDraft] = useState({title:"", type:"سؤال", subject:"", grade:"", section:"", content:""});
   const [editingPreparationId, setEditingPreparationId] = useState(null);
   const [savedPlans, setSavedPlans] = useState(() =>
     load("m2_curriculum_plans", []),
@@ -493,6 +499,7 @@ function App() {
     () => persist("m2_saved_preparations", savedPreparations),
     [savedPreparations],
   );
+  useEffect(() => persist("m2_knowledge_bank", knowledgeBank), [knowledgeBank]);
   useEffect(() => {
     if (!plannerBook) return;
     // الكتاب مصدر مستقل؛ المادة/الفرع يحددان طريقة التحضير فقط.
@@ -1059,6 +1066,38 @@ ${sourceExcerpt}
     setEditingPreparationId(item.id);
     setTab("ai");
   };
+  const resetKnowledgeDraft = () => {
+    setKnowledgeDraft({title:"",type:"سؤال",subject,grade,section,content:""});
+    setEditingKnowledgeId(null);
+    setKnowledgeFormOpen(true);
+  };
+  const saveKnowledgeItem = () => {
+    if (!knowledgeDraft.title.trim() || !knowledgeDraft.content.trim()) {
+      alert("أدخل عنواناً ومحتوى قبل الحفظ.");
+      return;
+    }
+    const now = new Date().toISOString();
+    if (editingKnowledgeId != null) {
+      setKnowledgeBank(items => items.map(item => item.id === editingKnowledgeId ? {...item,...knowledgeDraft,title:knowledgeDraft.title.trim(),content:knowledgeDraft.content.trim(),updatedAt:now} : item));
+    } else {
+      setKnowledgeBank(items => [{id:`knowledge-${Date.now()}`,...knowledgeDraft,title:knowledgeDraft.title.trim(),content:knowledgeDraft.content.trim(),createdAt:now,updatedAt:now},...items]);
+    }
+    setKnowledgeFormOpen(false);
+    setEditingKnowledgeId(null);
+  };
+  const editKnowledgeItem = (item) => {
+    setKnowledgeDraft({title:item.title || "",type:item.type || "سؤال",subject:item.subject || subject,grade:item.grade || grade,section:item.section || section,content:item.content || ""});
+    setEditingKnowledgeId(item.id);
+    setKnowledgeFormOpen(true);
+  };
+  const deleteKnowledgeItem = (id) => {
+    if (confirm("حذف هذا العنصر من بنك المعلومات؟")) setKnowledgeBank(items => items.filter(item => item.id !== id));
+  };
+  const visibleKnowledgeItems = knowledgeBank.filter(item => {
+    const query=knowledgeQuery.trim().toLocaleLowerCase();
+    const matchesQuery=!query || `${item.title} ${item.content} ${item.subject} ${item.grade}`.toLocaleLowerCase().includes(query);
+    return matchesQuery && (knowledgeTypeFilter === "الكل" || item.type === knowledgeTypeFilter);
+  });
   const deletePreparation = (id) => {
     if (confirm("حذف هذا التحضير؟")) {
       setSavedPreparations((x) => x.filter((v) => v.id !== id));
@@ -1395,6 +1434,13 @@ ${sourceExcerpt}
                     text="الأحد إلى الخميس"
                     onClick={() => setTab("schedule")}
                   />
+                  <Tile
+                    tone="violet"
+                    icon={<Library />}
+                    title="بنك المعلومات"
+                    text={`${knowledgeBank.length} سؤال ومذكرة وامتحان`}
+                    onClick={() => setTab("knowledge")}
+                  />
                 </div>
                 <section className="ai-card">
                   <div>
@@ -1413,6 +1459,33 @@ ${sourceExcerpt}
                   <button onClick={() => setTab("ai")}>فتح المساعد</button>
                 </section>
               </div>
+            )}
+            {tab === "knowledge" && (
+              <section className="panel knowledge-panel" dir="rtl">
+                <div className="panelhead">
+                  <div><span className="eyebrow">مكتبة الصف والمادة</span><h2>بنك المعلومات</h2><p>احفظ الأسئلة والمذكرات والامتحانات وابحث فيها حسب العنوان أو المحتوى.</p></div>
+                  {!knowledgeFormOpen && <button className="primary" onClick={resetKnowledgeDraft}><Plus size={16}/> إضافة إلى البنك</button>}
+                </div>
+                {knowledgeFormOpen && <div className="knowledge-form">
+                  <div className="knowledge-fields">
+                    <label>نوع المحتوى<select value={knowledgeDraft.type} onChange={e=>setKnowledgeDraft(d=>({...d,type:e.target.value}))}>{["سؤال","مذكرة","امتحان"].map(type=><option key={type}>{type}</option>)}</select></label>
+                    <label>المادة<select value={knowledgeDraft.subject} onChange={e=>setKnowledgeDraft(d=>({...d,subject:e.target.value}))}>{subjects.map(value=><option key={value}>{value}</option>)}</select></label>
+                    <label>الصف<select value={knowledgeDraft.grade} onChange={e=>setKnowledgeDraft(d=>({...d,grade:e.target.value}))}>{grades.map(value=><option key={value}>{value}</option>)}</select></label>
+                    <label>الشعبة<select value={knowledgeDraft.section} onChange={e=>setKnowledgeDraft(d=>({...d,section:e.target.value}))}>{sections.map(value=><option key={value}>{value}</option>)}</select></label>
+                    <label className="knowledge-title">العنوان<input value={knowledgeDraft.title} onChange={e=>setKnowledgeDraft(d=>({...d,title:e.target.value}))} placeholder="مثال: أسئلة الوحدة الأولى"/></label>
+                    <label className="knowledge-content">المحتوى<textarea value={knowledgeDraft.content} onChange={e=>setKnowledgeDraft(d=>({...d,content:e.target.value}))} placeholder="اكتب السؤال أو المذكرة أو محتوى الامتحان..."/></label>
+                  </div>
+                  <div className="actions"><button className="primary" onClick={saveKnowledgeItem}><Save size={16}/> حفظ</button><button onClick={()=>{setKnowledgeFormOpen(false);setEditingKnowledgeId(null);}}>إلغاء</button></div>
+                </div>}
+                <div className="knowledge-filters">
+                  <label className="search"><Search size={17}/><input value={knowledgeQuery} onChange={e=>setKnowledgeQuery(e.target.value)} placeholder="ابحث في الأسئلة والمذكرات والامتحانات..."/></label>
+                  <select aria-label="تصفية نوع بنك المعلومات" value={knowledgeTypeFilter} onChange={e=>setKnowledgeTypeFilter(e.target.value)}>{["الكل","سؤال","مذكرة","امتحان"].map(type=><option key={type}>{type}</option>)}</select>
+                </div>
+                {visibleKnowledgeItems.length === 0 ? <div className="empty-state">لا توجد عناصر مطابقة. أضف سؤالاً أو مذكرة أو امتحاناً ليظهر هنا.</div> : <div className="knowledge-list">{visibleKnowledgeItems.map(item=><article className="knowledge-item" key={item.id}>
+                  <div className="knowledge-item-head"><div><span className={`knowledge-badge ${item.type === "امتحان" ? "exam" : item.type === "مذكرة" ? "note" : "question"}`}>{item.type || "سؤال"}</span><h3>{item.title}</h3><small>{item.subject || "—"} · {item.grade || "—"} · الشعبة {item.section || "—"}</small></div><div className="actions"><button onClick={()=>editKnowledgeItem(item)}><Edit3 size={15}/> تعديل</button><button className="danger" aria-label="حذف العنصر" onClick={()=>deleteKnowledgeItem(item.id)}><Trash2 size={15}/></button></div></div>
+                  <p className="knowledge-item-content">{item.content}</p>
+                </article>)}</div>}
+              </section>
             )}
             {tab === "schedule" && (
               <section className="panel weekly-panel">
@@ -2263,6 +2336,13 @@ ${sourceExcerpt}
           >
             <Bot />
             <span>الذكاء</span>
+          </button>
+          <button
+            className={tab === "knowledge" ? "active" : ""}
+            onClick={() => setTab("knowledge")}
+          >
+            <Library />
+            <span>البنك</span>
           </button>
           <button
             className={tab === "settings" ? "active" : ""}

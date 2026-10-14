@@ -95,7 +95,7 @@ main{padding:14px;max-width:1100px;margin:auto}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{display:flex;align-items:center;gap:6px;border:1px solid #dfe7ed;border-radius:999px;padding:7px 9px}
 .chip button{border:0;background:transparent;color:#557084;padding:3px}
-.nav{position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.98);border-top:1px solid #dfe7ed;display:grid;grid-template-columns:repeat(5,1fr);z-index:10;padding:4px 4px max(7px,env(safe-area-inset-bottom));box-shadow:0 -7px 22px rgba(28,63,102,.05)}
+.nav{position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.98);border-top:1px solid #dfe7ed;display:grid;grid-template-columns:repeat(6,1fr);z-index:10;padding:4px 4px max(7px,env(safe-area-inset-bottom));box-shadow:0 -7px 22px rgba(28,63,102,.05)}
 .nav button{border:0;background:transparent;color:#748492;padding:7px 4px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;min-height:52px;border-radius:12px}
 .nav button svg{width:21px}
 .nav button.active{color:var(--navy);font-weight:800;background:#eef6fc}
@@ -241,7 +241,7 @@ main{padding:11px}
 .official-schedule-footer{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;background:#eee9d8;padding:14px;margin-top:12px;color:#34312b}
 
 /* Signature pad and five-item Arabic navigation */
-.nav{grid-template-columns:repeat(5,minmax(0,1fr))}
+.nav{grid-template-columns:repeat(6,minmax(0,1fr))}
 .nav button{font-size:10px;padding-inline:2px}
 .nav button svg{width:19px;height:19px}
 .signature-pad{border:1px solid #dce5ec;border-radius:14px;padding:8px;background:#fbfdff}
@@ -276,3 +276,25 @@ main{padding:11px}
 .rich-print{white-space:normal;color:#111}.rich-print div{min-height:1.5em}
 @media(max-width:480px){.period-row{grid-template-columns:1fr 1fr}.period-row>strong{grid-column:1/-1}}
 @media(max-width:390px){.nav button{font-size:9px}.nav button svg{width:17px;height:17px}}
+
+
+/* Arabic question, notes and exam bank */
+.knowledge-panel{display:grid;gap:12px}
+.knowledge-form{padding:14px;border:1px solid #dce7f2;border-radius:16px;background:#f9fbfd}
+.knowledge-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.knowledge-fields label{display:grid;gap:6px;font-size:13px;font-weight:700;color:#345}
+.knowledge-fields input,.knowledge-fields select,.knowledge-fields textarea,.knowledge-filters>select{width:100%;min-width:0;padding:10px;border:1px solid #dce5ec;border-radius:10px;background:#fff;color:var(--ink);font:inherit}
+.knowledge-title,.knowledge-content{grid-column:1/-1}
+.knowledge-fields textarea{min-height:150px;resize:vertical;line-height:1.8}
+.knowledge-filters{display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:8px;align-items:start}
+.knowledge-filters .search{margin:0;min-height:44px}
+.knowledge-list{display:grid;gap:10px}
+.knowledge-item{border:1px solid #dce6ee;border-radius:14px;padding:13px;background:#fff}
+.knowledge-item-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.knowledge-item-head h3{margin:5px 0;color:var(--navy);font-size:16px}
+.knowledge-item-head small{color:var(--muted)}
+.knowledge-badge{display:inline-block;padding:4px 9px;border-radius:999px;font-size:11px;font-weight:800}
+.knowledge-badge.question{background:#eaf4ff;color:#1769aa}.knowledge-badge.note{background:#edf8f0;color:#16834a}.knowledge-badge.exam{background:#fff0f0;color:#c62828}
+.knowledge-item-content{margin:12px 0 0;padding:12px;border-radius:10px;background:#f8fafc;white-space:pre-wrap;line-height:1.8;overflow-wrap:anywhere}
+@media(max-width:620px){.knowledge-fields{grid-template-columns:1fr 1fr}.knowledge-filters{grid-template-columns:1fr}.knowledge-filters>select{width:100%}.knowledge-item-head{flex-direction:column}.knowledge-item-head .actions{width:100%}.knowledge-item-head .actions button{flex:1}}
+@media(max-width:390px){.nav button{font-size:8px;padding-inline:1px}.nav button svg{width:16px;height:16px}}
