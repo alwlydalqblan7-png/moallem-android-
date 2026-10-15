@@ -52,6 +52,11 @@ if (!strings.includes("name=\"moallem_widget_description\"")) {
 // environment. Debug builds need no signing secret.
 const appBuildPath = "android/app/build.gradle";
 let appBuild = readFileSync(appBuildPath, "utf8");
+const versionCode = Number(process.env.MOALLEM_VERSION_CODE || 1);
+if (!Number.isSafeInteger(versionCode) || versionCode < 1) throw new Error("MOALLEM_VERSION_CODE must be a positive integer");
+const versionName = process.env.MOALLEM_VERSION_NAME || `2.7.${versionCode}`;
+appBuild = appBuild.replace(/versionCode\s+\d+/, `versionCode ${versionCode}`);
+appBuild = appBuild.replace(/versionName\s+['"][^'"]+['"]/, `versionName "${versionName.replaceAll('"', '')}"`);
 const signingMarker = "MOALLEM_RELEASE_STORE_FILE";
 if (!appBuild.includes(signingMarker)) {
   appBuild += `
@@ -71,5 +76,5 @@ if ([moallemReleaseStore, moallemReleaseStorePassword, moallemReleaseKeyAlias, m
     android.buildTypes.release.signingConfig = android.signingConfigs.moallemProduction
 }
 `;
-  writeFileSync(appBuildPath, appBuild);
 }
+writeFileSync(appBuildPath, appBuild);

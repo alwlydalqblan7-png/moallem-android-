@@ -34,15 +34,42 @@ jobs:
         run: npx @capacitor/assets generate --android --iconBackgroundColor '#1C3F66' --iconBackgroundColorDark '#1C3F66' --splashBackgroundColor '#1C3F66' --splashBackgroundColorDark '#1C3F66'
       - name: Sync Capacitor
         run: npx cap sync android
-      - name: Add Android exact alarm permission
+      - name: Prepare optional production signing key
+        env:
+          MOALLEM_RELEASE_KEYSTORE_BASE64: ${{ secrets.MOALLEM_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$MOALLEM_RELEASE_KEYSTORE_BASE64" ]; then
+            printf '%s' "$MOALLEM_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/moallem-safe202627.jks"
+            chmod 600 "$RUNNER_TEMP/moallem-safe202627.jks"
+          fi
+      - name: Add Android exact alarm permission and signing config
+        env:
+          MOALLEM_RELEASE_STORE_FILE: ${{ runner.temp }}/moallem-safe202627.jks
+          MOALLEM_RELEASE_STORE_PASSWORD: ${{ secrets.MOALLEM_RELEASE_STORE_PASSWORD }}
+          MOALLEM_RELEASE_KEY_ALIAS: ${{ secrets.MOALLEM_RELEASE_KEY_ALIAS }}
+          MOALLEM_RELEASE_KEY_PASSWORD: ${{ secrets.MOALLEM_RELEASE_KEY_PASSWORD }}
         run: node scripts/prepare-android.mjs
       - name: Make Gradle executable
         run: chmod +x android/gradlew
       - name: Build Debug APK
+        env:
+          MOALLEM_VERSION_CODE: ${{ github.run_number }}
+          MOALLEM_VERSION_NAME: 2026.2027.${{ github.run_number }}
+          MOALLEM_RELEASE_STORE_FILE: ${{ runner.temp }}/moallem-safe202627.jks
+          MOALLEM_RELEASE_STORE_PASSWORD: ${{ secrets.MOALLEM_RELEASE_STORE_PASSWORD }}
+          MOALLEM_RELEASE_KEY_ALIAS: ${{ secrets.MOALLEM_RELEASE_KEY_ALIAS }}
+          MOALLEM_RELEASE_KEY_PASSWORD: ${{ secrets.MOALLEM_RELEASE_KEY_PASSWORD }}
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: |
+          ./gradlew assembleDebug
+          if [ -f "$MOALLEM_RELEASE_STORE_FILE" ] && [ -n "$MOALLEM_RELEASE_STORE_PASSWORD" ] && [ -n "$MOALLEM_RELEASE_KEY_ALIAS" ] && [ -n "$MOALLEM_RELEASE_KEY_PASSWORD" ]; then
+            ./gradlew assembleRelease
+          fi
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Moallem-Safe-2026-2027-Debug-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: Moallem-Safe-2026-2027-APK
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: warn
