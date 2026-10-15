@@ -8,7 +8,7 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
-import com.getcapacitor.annotation.PluginMethod;
+import com.getcapacitor.PluginMethod;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
@@ -30,7 +30,7 @@ public class BackupFilePlugin extends Plugin {
     }
 
     @ActivityCallback
-    private void saveResult(PluginCall call, android.app.ActivityResult result) {
+    private void saveResult(PluginCall call, androidx.activity.result.ActivityResult result) {
         if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
             call.reject("CANCELLED");
             return;
