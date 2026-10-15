@@ -47,3 +47,29 @@ if (!strings.includes("name=\"moallem_widget_description\"")) {
   strings = strings.replace("</resources>", '    <string name="moallem_widget_description">بطاقة حصص اليوم من دفتر المعلّم</string>\n</resources>');
   writeFileSync(stringsPath, strings);
 }
+
+// Keep the release key outside Git and supply it through the CI/local build
+// environment. Debug builds need no signing secret.
+const appBuildPath = "android/app/build.gradle";
+let appBuild = readFileSync(appBuildPath, "utf8");
+const signingMarker = "MOALLEM_RELEASE_STORE_FILE";
+if (!appBuild.includes(signingMarker)) {
+  appBuild += `
+
+// Optional production signing. Keep the keystore outside the repository.
+def moallemReleaseStore = System.getenv("MOALLEM_RELEASE_STORE_FILE")
+def moallemReleaseStorePassword = System.getenv("MOALLEM_RELEASE_STORE_PASSWORD")
+def moallemReleaseKeyAlias = System.getenv("MOALLEM_RELEASE_KEY_ALIAS")
+def moallemReleaseKeyPassword = System.getenv("MOALLEM_RELEASE_KEY_PASSWORD")
+if ([moallemReleaseStore, moallemReleaseStorePassword, moallemReleaseKeyAlias, moallemReleaseKeyPassword].every { it }) {
+    android.signingConfigs.create("moallemProduction") {
+        storeFile rootProject.file(moallemReleaseStore)
+        storePassword moallemReleaseStorePassword
+        keyAlias moallemReleaseKeyAlias
+        keyPassword moallemReleaseKeyPassword
+    }
+    android.buildTypes.release.signingConfig = android.signingConfigs.moallemProduction
+}
+`;
+  writeFileSync(appBuildPath, appBuild);
+}

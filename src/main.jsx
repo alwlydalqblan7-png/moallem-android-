@@ -44,9 +44,10 @@ import moallemIcon from "./assets/moallem-icon.png";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { autoColorHtml, mergeSubjectOptions } from "./preparation-format.js";
-import { decodePdfBackupEntries } from "./backup-format.js";
+import { validateMoallemBackup } from "./backup-format.js";
 import { inspectDaftarBackup } from "./legacy-backup-inspector.js";
 import { getDailyWidgetStatus, parseStudentNames } from "./student-tools.js";
+import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const HomeWidget = registerPlugin("HomeWidget");
 const BackupFile = registerPlugin("BackupFile");
@@ -199,10 +200,7 @@ const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
   reader.onerror = () => reject(reader.error);
   reader.readAsDataURL(blob);
 });
-const replacePdfBlobs = async (pdfs) => {
-  // Decode every file before opening the write transaction. A malformed backup
-  // must never clear the user's existing IndexedDB library.
-  const decoded = decodePdfBackupEntries(pdfs);
+const replaceDecodedPdfBlobs = async (decoded) => {
   const db = await openPdfDb();
   try {
     await new Promise((resolve, reject) => {
@@ -396,21 +394,30 @@ function App() {
     if (!file) return;
     try {
       const backup = JSON.parse(await file.text());
-      if (!["moallem-backup-v1", "moallem-backup-v2"].includes(backup?.format) ||
-          !backup.data || typeof backup.data !== "object" || Array.isArray(backup.data)) {
-        throw new Error("ملف النسخة غير صالح");
+      const validated = validateMoallemBackup(backup);
+      const entries = Object.entries(validated.data);
+      if (!entries.length) throw new Error("النسخة لا تحتوي بيانات معلّم");
+      if (!window.confirm(`ستستبدل البيانات التي تحمل المفاتيح نفسها${backup.format === "moallem-backup-v2" ? `، وستستبدل مكتبة PDF بـ ${validated.pdfs.length} ملف` : ""}. احفظ نسخة احتياطية مستقلة قبل المتابعة. هل تريد الاستعادة؟`)) return;
+      const previousValues = Object.fromEntries(entries.map(([key]) => [key, localStorage.getItem(key)]));
+      const previousPdfs = backup.format === "moallem-backup-v2" ? await listPdfBlobs() : null;
+      try {
+        if (backup.format === "moallem-backup-v2") await replaceDecodedPdfBlobs(validated.pdfs);
+        for (const [key, value] of entries) localStorage.setItem(key, value);
+      } catch (writeError) {
+        let rollbackError = null;
+        for (const [key, value] of Object.entries(previousValues)) {
+          try {
+            if (value === null) localStorage.removeItem(key);
+            else localStorage.setItem(key, value);
+          } catch (error) { rollbackError ||= error; }
+        }
+        if (previousPdfs) {
+          try { await replaceDecodedPdfBlobs(previousPdfs); }
+          catch (error) { rollbackError ||= error; }
+        }
+        if (rollbackError) console.error("Backup restore rollback was incomplete", rollbackError);
+        throw writeError;
       }
-      const entries = Object.entries(backup.data);
-      if (!entries.length || entries.some(([key, value]) => !key.startsWith("m2_") || typeof value !== "string")) {
-        throw new Error("محتوى النسخة غير صالح");
-      }
-      for (const [, value] of entries) JSON.parse(value);
-      if (backup.format === "moallem-backup-v2" && !Array.isArray(backup.pdfs)) {
-        throw new Error("قائمة ملفات PDF مفقودة من النسخة");
-      }
-      if (!window.confirm("ستستبدل الاستعادة بيانات معلّم الحالية. هل حفظت نسخة مستقلة منها وتريد المتابعة؟")) return;
-      if (backup.format === "moallem-backup-v2") await replacePdfBlobs(backup.pdfs);
-      for (const [key, value] of entries) localStorage.setItem(key, value);
       window.alert("اكتملت استعادة البيانات. سيعاد تحميل التطبيق الآن.");
       window.location.reload();
     } catch (err) {
@@ -667,7 +674,7 @@ function App() {
         ...book.marks,
         [sid]: {
           ...(book.marks[sid] || {}),
-          [cid]: val === "" ? "" : Number(val),
+          [cid]: normalizeMarkInput(val, book.columns.find((column) => column.id === cid)?.max),
         },
       },
     });
@@ -682,18 +689,12 @@ function App() {
   };
   const calc = (s) => {
     const m = book.marks[s.id] || {};
-    let got = 0,
-      max = 0;
-    book.columns.forEach((c) => {
-      if (m[c.id] !== "" && m[c.id] != null && !Number.isNaN(Number(m[c.id]))) {
-        got += Number(m[c.id]);
-        max += Number(c.max) || 0;
-      }
-    });
+    const totals = calculateGradebookTotals(m, book.columns);
+    let { earned: got, maximum: max } = totals;
     if (split200 && finalExamColumn) {
       const workCols = book.columns.filter(c => c.id !== "official_final_exam");
-      const works = workCols.reduce((sum, c) => sum + (m[c.id] === "" || m[c.id] == null ? 0 : Number(m[c.id]) || 0), 0);
-      const exam = m.official_final_exam === "" || m.official_final_exam == null ? null : Number(m.official_final_exam);
+      const works = calculateGradebookTotals(m, workCols).earned;
+      const exam = m.official_final_exam === "" || m.official_final_exam == null ? null : normalizeMarkInput(m.official_final_exam, finalExamColumn.max);
       const final = exam == null ? null : (works + exam) / 2;
       return { got: final ?? works, max: officialMax, pct: Math.round(((final ?? works) / officialMax) * 1000) / 10,
         works, exam, final, split: true };

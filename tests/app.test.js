@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { autoColorHtml, mergeSubjectOptions } from "../src/preparation-format.js";
-import { decodePdfBackupEntries } from "../src/backup-format.js";
+import { decodePdfBackupEntries, validateMoallemBackup } from "../src/backup-format.js";
 import { getDailyWidgetStatus, parseStudentNames } from "../src/student-tools.js";
 
 test("subject migration adds new options without removing or renaming legacy subjects", () => {
@@ -19,6 +19,25 @@ test("PDF restore payload round-trips bytes and rejects malformed entries before
   assert.equal(await restored[0].blob.text(), "%PDF-1.4\n");
   assert.throws(() => decodePdfBackupEntries([{id:"bad",data:"data:text/plain;base64,QQ=="}]), /PDF غير صالح/);
   assert.throws(() => decodePdfBackupEntries([{id:"bad",data:"data:application/pdf;base64,%%%"}]), /PDF غير صالح/);
+});
+
+test("full backup restoration validates every local record before changing storage", () => {
+  const valid = validateMoallemBackup({
+    format: "moallem-backup-v2",
+    data: { m2_students: JSON.stringify([{ id: 1, name: "طالبة" }]), m2_attendance: "{}" },
+    pdfs: [{ id: "book-1", data: "data:application/pdf;base64,JVBERi0xLjQK" }],
+  });
+  assert.equal(valid.pdfs.length, 1);
+  assert.throws(() => validateMoallemBackup({
+    format: "moallem-backup-v2",
+    data: { m2_students: "{" },
+    pdfs: [{ id: "book-2", data: "data:application/pdf;base64,JVBERi0xLjQK" }],
+  }), /تعذر التحقق/);
+  assert.throws(() => validateMoallemBackup({
+    format: "moallem-backup-v2",
+    data: { students: "[]" },
+    pdfs: [],
+  }), /سجل غير صالح/);
 });
 
 test("automatic preparation colors match categories and escape user text", () => {

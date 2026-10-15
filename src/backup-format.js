@@ -11,3 +11,21 @@ export const decodePdfBackupEntries = (pdfs) => {
     return { id: String(pdf.id), blob: new Blob([bytes], { type: "application/pdf" }) };
   });
 };
+
+export function validateMoallemBackup(backup) {
+  if (!backup || typeof backup !== "object" || Array.isArray(backup)) throw new Error("ملف النسخة غير صالح");
+  if (!["moallem-backup-v1", "moallem-backup-v2"].includes(backup.format)) throw new Error("إصدار النسخة الاحتياطية غير مدعوم");
+  if (!backup.data || typeof backup.data !== "object" || Array.isArray(backup.data)) throw new Error("بيانات النسخة غير صالحة");
+
+  const entries = Object.entries(backup.data);
+  for (const [key, value] of entries) {
+    if (!key.startsWith("m2_") || typeof value !== "string") throw new Error("تحتوي النسخة على سجل غير صالح");
+    try { JSON.parse(value); } catch { throw new Error(`تعذر التحقق من بيانات: ${key}`); }
+  }
+
+  let pdfs = [];
+  if (backup.format === "moallem-backup-v2") {
+    pdfs = decodePdfBackupEntries(backup.pdfs);
+  }
+  return { data: backup.data, pdfs };
+}

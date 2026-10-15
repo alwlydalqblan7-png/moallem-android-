@@ -1,4 +1,4 @@
-name: Build Moallem Test APK
+name: Build Moallem Safe APK
 
 on:
   workflow_dispatch:
@@ -44,5 +44,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Moallem-Official-2026-2027-Debug-APK
+          name: Moallem-Safe-2026-2027-Debug-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
