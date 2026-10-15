@@ -382,6 +382,7 @@ function App() {
       window.location.reload();
     } catch(err){window.alert(err?.message||"تعذرت الاستعادة");}
   };
+  const [fullPagePreparation, setFullPagePreparation] = useState(false);
   const [legacyBackupReport, setLegacyBackupReport] = useState(null);
   const [legacyBackupError, setLegacyBackupError] = useState("");
   const inspectLegacyBackupFile = async (file) => {
@@ -2354,7 +2355,10 @@ ${sourceExcerpt}
                 )}
                 {aiResult && (
                   <>
-                    <PreparationEditor key={String(editingPreparationId || "draft")} text={aiResult} initialHtml={aiRichContent || autoColorHtml(aiResult)} onChange={updateCurrentPreparation}/>
+                    <div className="prep-page-toggle"><button type="button" onClick={() => setFullPagePreparation(value => !value)}>{fullPagePreparation ? "تصغير صفحة التحضير" : "عرض التحضير بصفحة كاملة"}</button><span>الألوان محفوظة كما تظهر في الطباعة</span></div>
+                    <div className={fullPagePreparation ? "prep-fullpage" : "prep-standard"}>
+                      <PreparationEditor key={String(editingPreparationId || "draft")} text={aiResult} initialHtml={aiRichContent || autoColorHtml(aiResult)} onChange={updateCurrentPreparation}/>
+                    </div>
                     <div className="actions prep-actions">
                       <button
                         className="primary"
