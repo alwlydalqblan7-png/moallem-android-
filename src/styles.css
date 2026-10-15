@@ -325,3 +325,14 @@ main{padding:11px}
 .knowledge-item-content{margin:12px 0 0;padding:12px;border-radius:10px;background:#f8fafc;white-space:pre-wrap;line-height:1.8;overflow-wrap:anywhere}
 @media(max-width:620px){.knowledge-fields{grid-template-columns:1fr 1fr}.knowledge-filters{grid-template-columns:1fr}.knowledge-filters>select{width:100%}.knowledge-item-head{flex-direction:column}.knowledge-item-head .actions{width:100%}.knowledge-item-head .actions button{flex:1}}
 @media(max-width:390px){.nav button{font-size:8px;padding-inline:1px}.nav button svg{width:16px;height:16px}}
+
+
+/* Full-page preparation editor, optimized for copying into a paper notebook. */
+.prep-page-toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0}
+.prep-page-toggle button{border:1px solid #1769aa;background:#eaf4ff;color:#1769aa;border-radius:10px;padding:10px 14px;font-weight:700}
+.prep-page-toggle span{font-size:12px;color:#536579}
+.prep-fullpage{width:100%;max-width:none;margin:0 auto;background:#fff;border:1px solid #dbe5ed;border-radius:12px;padding:clamp(10px,3vw,26px);box-shadow:0 5px 22px #102a4310}
+.prep-fullpage .preparation-editor{width:100%;max-width:none}
+.prep-fullpage .rich-editor{display:block;box-sizing:border-box;width:100%;max-width:none;min-height:72vh;padding:clamp(16px,4vw,34px);background:#fff;color:#111;line-height:2;font-size:17px;white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #d9e1e7;border-radius:8px}
+.prep-fullpage .prep-color-tools{position:sticky;top:0;z-index:2;background:#fff;padding:10px 0;display:flex;flex-wrap:wrap;gap:7px}
+@media(max-width:620px){.prep-fullpage{padding:6px;border-radius:8px}.prep-fullpage .rich-editor{min-height:75vh;padding:16px;font-size:16px}}
