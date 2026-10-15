@@ -354,34 +354,70 @@ function App() {
     }
   };
   const exportSettingsBackup = async () => {
-    const data = {};
-    for(let i=0;i<localStorage.length;i++){
-      const key=localStorage.key(i);
-      if(key?.startsWith("m2_")) data[key]=localStorage.getItem(key);
-    }
     try {
-      const pdfs = await Promise.all((await listPdfBlobs()).map(async ({id, blob}) => ({id, data: await blobToDataUrl(blob)})));
-      const blob=new Blob([JSON.stringify({format:"moallem-backup-v2",createdAt:new Date().toISOString(),data,pdfs},null,2)],{type:"application/json"});
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement("a");a.href=url;a.download="moallem-backup-"+new Date().toISOString().slice(0,10)+".json";a.click();
-      setTimeout(()=>URL.revokeObjectURL(url),2000);
-    } catch (err) { window.alert(err?.message || "تعذر إنشاء النسخة الاحتياطية"); }
+      const data = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith("m2_")) data[key] = localStorage.getItem(key);
+      }
+      const pdfs = await Promise.all((await listPdfBlobs()).map(async ({ id, blob }) => ({
+        id, data: await blobToDataUrl(blob),
+      })));
+      const payload = JSON.stringify({
+        format: "moallem-backup-v2", createdAt: new Date().toISOString(), data, pdfs,
+      });
+      const filename = "moallem-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+      const file = new File([payload], filename, { type: "application/json" });
+      // Android WebViews often ignore an <a download> click. Prefer the native
+      // share sheet where supported so the user can save the file explicitly.
+      if (Capacitor.isNativePlatform() && navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: "نسخة معلّم الاحتياطية" });
+          window.alert("تم فتح مشاركة النسخة. تأكد من حفظ الملف في مكان آمن.");
+          return;
+        } catch (error) {
+          if (error?.name === "AbortError") return;
+          // Fall back to browser download if native sharing fails.
+        }
+      }
+      const blob = new Blob([payload], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      window.alert("تم طلب تنزيل النسخة. تأكد من وجود ملف " + filename + " في التنزيلات؛ لا تعتبر النسخ ناجحًا قبل التأكد.");
+    } catch (err) {
+      window.alert("فشل إنشاء النسخة الاحتياطية: " + (err?.message || "خطأ غير معروف"));
+    }
   };
   const importSettingsBackup = async (file) => {
-    if(!file)return;
+    if (!file) return;
     try {
-      const backup=JSON.parse(await file.text());
-      if(!["moallem-backup-v1","moallem-backup-v2"].includes(backup?.format)||!backup.data||typeof backup.data!=="object")throw new Error("ملف النسخة غير صالح");
-      if(!window.confirm(`ستستبدل الاستعادة بيانات التطبيق الحالية${backup.format==="moallem-backup-v2"?` وتستعيد ${backup.pdfs?.length||0} ملف PDF`:""}. هل أنت متأكد؟`))return;
-      if (backup.format === "moallem-backup-v2" && Array.isArray(backup.pdfs)) {
-        await replacePdfBlobs(backup.pdfs);
+      const backup = JSON.parse(await file.text());
+      if (!["moallem-backup-v1", "moallem-backup-v2"].includes(backup?.format) ||
+          !backup.data || typeof backup.data !== "object" || Array.isArray(backup.data)) {
+        throw new Error("ملف النسخة غير صالح");
       }
-      for(const [key,value] of Object.entries(backup.data)){
-        if(key.startsWith("m2_")&&typeof value==="string")localStorage.setItem(key,value);
+      const entries = Object.entries(backup.data);
+      if (!entries.length || entries.some(([key, value]) => !key.startsWith("m2_") || typeof value !== "string")) {
+        throw new Error("محتوى النسخة غير صالح");
       }
-      window.alert("تمت استعادة البيانات. سيُعاد تحميل التطبيق الآن.");
+      for (const [, value] of entries) JSON.parse(value);
+      if (backup.format === "moallem-backup-v2" && !Array.isArray(backup.pdfs)) {
+        throw new Error("قائمة ملفات PDF مفقودة من النسخة");
+      }
+      if (!window.confirm("ستستبدل الاستعادة بيانات معلّم الحالية. هل حفظت نسخة مستقلة منها وتريد المتابعة؟")) return;
+      if (backup.format === "moallem-backup-v2") await replacePdfBlobs(backup.pdfs);
+      for (const [key, value] of entries) localStorage.setItem(key, value);
+      window.alert("اكتملت استعادة البيانات. سيعاد تحميل التطبيق الآن.");
       window.location.reload();
-    } catch(err){window.alert(err?.message||"تعذرت الاستعادة");}
+    } catch (err) {
+      window.alert("فشلت الاستعادة دون إكمال العملية: " + (err?.message || "خطأ غير معروف"));
+    }
   };
   const [fullPagePreparation, setFullPagePreparation] = useState(false);
   const [legacyBackupReport, setLegacyBackupReport] = useState(null);
