@@ -671,6 +671,14 @@ function App() {
         },
       },
     });
+  const split200 = officialGradeMaximum(grade, subject) === 200;
+  const finalExamColumn = book.columns.find(c => c.id === "official_final_exam");
+  const ensureFinalExam = () => {
+    if (finalExamColumn) return;
+    updateBook({ ...book, columns: [...book.columns, {
+      id: "official_final_exam", name: "الامتحان الأخير", max: 200, type: "امتحان نهائي",
+    }] });
+  };
   const calc = (s) => {
     const m = book.marks[s.id] || {};
     let got = 0,
@@ -681,6 +689,14 @@ function App() {
         max += Number(c.max) || 0;
       }
     });
+    if (split200 && finalExamColumn) {
+      const workCols = book.columns.filter(c => c.id !== "official_final_exam");
+      const works = workCols.reduce((sum, c) => sum + (m[c.id] === "" || m[c.id] == null ? 0 : Number(m[c.id]) || 0), 0);
+      const exam = m.official_final_exam === "" || m.official_final_exam == null ? null : Number(m.official_final_exam);
+      const final = exam == null ? null : (works + exam) / 2;
+      return { got: final ?? works, max: 200, pct: final == null ? works / 2 : final / 2,
+        works, exam, final, split: true };
+    }
     return { got, max, pct: max ? Math.round((got / max) * 1000) / 10 : 0 };
   };
   const addStudent = () =>
@@ -1814,6 +1830,7 @@ ${sourceExcerpt}
                         اعتماد توزيع 2025–2026 ({officialGradeMaximum(grade, subject)})
                       </button>
                     )}
+                    {split200 && !finalExamColumn && <button type="button" onClick={ensureFinalExam}>إضافة الامتحان الأخير /200 وحساب المعدّل</button>}
                     <button onClick={addColumn}>
                       <Plus size={16} /> إضافة عمود
                     </button>
@@ -1857,7 +1874,8 @@ ${sourceExcerpt}
                             )}
                           </th>
                         ))}
-                        <th>المجموع</th>
+                        {split200 && finalExamColumn && <th>درجة الأعمال /200</th>}
+                        <th>{split200 && finalExamColumn ? "العلامة النهائية /200" : "المجموع"}</th>
                         <th>النسبة</th>
                       </tr>
                     </thead>
@@ -1881,9 +1899,10 @@ ${sourceExcerpt}
                                 />
                               </td>
                             ))}
+                            {c.split && <td><b>{c.works}/200</b></td>}
                             <td>
                               <b>
-                                {c.got}/{c.max}
+                                {c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`}
                               </b>
                             </td>
                             <td>
