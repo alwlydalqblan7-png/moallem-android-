@@ -3,7 +3,7 @@ name: Build Moallem Test APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/official-preparation-2026-2027]
+    branches: [main, feature/official-preparation-2026-2027, feature/safe-preparation-integration]
 
 jobs:
   build:
