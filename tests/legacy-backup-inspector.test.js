@@ -14,7 +14,9 @@ test("inspects without modifying original backup", () => {
     ["preparations", 1], ["students", 2], ["appSettings", 1],
   ]);
   assert.equal(JSON.stringify(input), original);
-  assert.equal(report.warnings.length, 4);
+  assert.equal(report.warnings.length, 5);
+  assert.ok(report.missingSections.includes("books"));
+  assert.ok(report.warnings.some((warning) => warning.includes("8 قسم")));
 });
 test("rejects wrong application and version", () => {
   assert.throws(() => inspectDaftarBackup({ ...fixture(), app: "other" }));
@@ -25,4 +27,15 @@ test("rejects invalid shapes and unknown keys", () => {
   assert.throws(() => inspectDaftarBackup({ ...fixture(), data: { appSettings: [] } }));
   assert.throws(() => inspectDaftarBackup({ ...fixture(), data: { secret: "x" } }));
   assert.throws(() => inspectDaftarBackup({ ...fixture(), data: {} }));
+});
+
+test("complete backup has no missing sections warning", () => {
+  const data = Object.fromEntries([
+    ["preparations", []], ["annualPlan", []], ["students", []], ["books", []],
+    ["weeklySchedule", {}], ["studentNotes", {}], ["studentAnnualReviews", {}],
+    ["gradebookRecords", {}], ["gradebookLimits", {}], ["gradebookRules", {}], ["appSettings", {}],
+  ]);
+  const report = inspectDaftarBackup({ ...fixture(), data });
+  assert.deepEqual(report.missingSections, []);
+  assert.equal(report.warnings.length, 4);
 });
