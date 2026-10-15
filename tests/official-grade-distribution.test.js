@@ -9,7 +9,7 @@ test("gradebook uses the supplied 2025-2026 subject maxima", () => {
     ["السابع", "العلوم العامة", 400], ["الثامن", "العلوم العامة", 400],
   ]) {
     assert.equal(officialGradeMaximum(grade, subject), max);
-    assert.equal(officialGradeColumns(grade, subject).reduce((sum, col) => sum + col.max, 0), max);
+    assert.equal(officialGradeColumns(grade, subject).filter(col => col.id !== "official_final_exam").reduce((sum, col) => sum + col.max, 0), max);
   }
 });
 test("Arabic includes 20/15/15/50 split", () => {
@@ -20,4 +20,8 @@ test("general science has two separately graded 200-point parts", () => {
 });
 test("unsupported subjects do not receive invented official maxima", () => {
   assert.equal(officialGradeColumns("التاسع", "المعلوماتية"), null);
+});
+
+test("200-point subjects have 50 oral, 50 homework, 100 quiz and 200 exam", () => {
+  assert.deepEqual(officialGradeColumns("السابع", "المعلوماتية").map(col => col.max), [50, 50, 100, 200]);
 });
