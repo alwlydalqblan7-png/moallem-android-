@@ -18,12 +18,13 @@ export function officialGradeColumns(grade, subject) {
   const max = grades[grade]?.[subject];
   if (!max) return null;
   if (subject === "العلوم العامة") {
-    return ["العلوم", "الفيزياء والكيمياء"].flatMap((part, group) => standard.map(([name, percent], index) => ({
+    const workColumns = ["العلوم", "الفيزياء والكيمياء"].flatMap((part, group) => standard.map(([name, percent], index) => ({
       id: "official_science_" + group + "_" + index,
       name: part + " — " + name,
       max: 200 * percent / 100,
       type: name,
     })));
+    return [...workColumns, { id: "official_final_exam", name: "الامتحان الأخير", max, type: "امتحان نهائي" }];
   }
   const parts = subject === "اللغة العربية" ? arabic : standard;
   const columns = parts.map(([name, percent], index) => ({
@@ -32,7 +33,7 @@ export function officialGradeColumns(grade, subject) {
     max: max * percent / 100,
     type: name,
   }));
-  return max === 200 ? [...columns, { id: "official_final_exam", name: "الامتحان الأخير", max: 200, type: "امتحان نهائي" }] : columns;
+  return [...columns, { id: "official_final_exam", name: "الامتحان الأخير", max, type: "امتحان نهائي" }];
 }
 export function officialGradeMaximum(grade, subject) {
   return grades[grade]?.[subject] ?? null;
