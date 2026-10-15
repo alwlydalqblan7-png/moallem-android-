@@ -16,6 +16,7 @@ const copyTemplate = (source, destination, replacements = {}) => {
 
 copyTemplate("native/android/java/MainActivity.java.in", join(javaDir, "MainActivity.java"), { "__APP_PACKAGE__": appId });
 copyTemplate("native/android/java/HomeWidgetPlugin.java.in", join(javaDir, "HomeWidgetPlugin.java"), { "__APP_PACKAGE__": appId });
+copyTemplate("native/android/java/BackupFilePlugin.java.in", join(javaDir, "BackupFilePlugin.java"), { "__APP_PACKAGE__": appId });
 copyTemplate("native/android/java/HomeWidgetProvider.java.in", join(javaDir, "HomeWidgetProvider.java"), { "__APP_PACKAGE__": appId });
 for (const resource of [
   "res/layout/moallem_widget.xml",
