@@ -26,12 +26,13 @@ export function officialGradeColumns(grade, subject) {
     })));
   }
   const parts = subject === "اللغة العربية" ? arabic : standard;
-  return parts.map(([name, percent], index) => ({
+  const columns = parts.map(([name, percent], index) => ({
     id: "official_" + index,
     name,
     max: max * percent / 100,
     type: name,
   }));
+  return max === 200 ? [...columns, { id: "official_final_exam", name: "الامتحان الأخير", max: 200, type: "امتحان نهائي" }] : columns;
 }
 export function officialGradeMaximum(grade, subject) {
   return grades[grade]?.[subject] ?? null;
