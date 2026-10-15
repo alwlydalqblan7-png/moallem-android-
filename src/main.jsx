@@ -694,7 +694,7 @@ function App() {
       const works = workCols.reduce((sum, c) => sum + (m[c.id] === "" || m[c.id] == null ? 0 : Number(m[c.id]) || 0), 0);
       const exam = m.official_final_exam === "" || m.official_final_exam == null ? null : Number(m.official_final_exam);
       const final = exam == null ? null : (works + exam) / 2;
-      return { got: final ?? works, max: 200, pct: final == null ? works / 2 : final / 2,
+      return { got: final ?? works, max: 200, pct: final == null ? Math.round(works / 2 * 10) / 10 : Math.round(final / 2 * 10) / 10,
         works, exam, final, split: true };
     }
     return { got, max, pct: max ? Math.round((got / max) * 1000) / 10 : 0 };
