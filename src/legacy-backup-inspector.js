@@ -27,10 +27,12 @@ export function inspectDaftarBackup(payload) {
       throw new Error("بيانات غير صالحة: " + key);
     }
   }
+  const missingKeys = LEGACY_BACKUP_KEYS.filter((key) => !keys.includes(key));
   return {
     format: "daftar-altahdir",
     version: 1,
     exportedAt: typeof payload.exportedAt === "string" ? payload.exportedAt : null,
+    missingSections: missingKeys,
     sections: keys.map((key) => ({
       key,
       kind: ARRAY_KEYS.has(key) ? "array" : "object",
@@ -38,6 +40,7 @@ export function inspectDaftarBackup(payload) {
     })),
     warnings: [
       "هذا فحص فقط؛ لم تُنقل أي بيانات.",
+      ...(missingKeys.length ? [`النسخة لا تحتوي على ${missingKeys.length} قسم/أقسام من أقسام دفتر التحضير؛ قد تكون غير مستخدمة أو غير محفوظة وقت التصدير.`] : []),
       "ملفات PDF المحفوظة في IndexedDB لا تتضمنها النسخة العامة.",
       "صفحات السبورة تحتاج نسخة احتياطية مستقلة.",
       "يجب مطابقة معرّفات الصفوف والطلاب والكتب قبل الاستيراد.",
