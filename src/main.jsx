@@ -671,12 +671,13 @@ function App() {
         },
       },
     });
-  const split200 = officialGradeMaximum(grade, subject) === 200;
+  const officialMax = officialGradeMaximum(grade, subject);
+  const split200 = Boolean(officialMax);
   const finalExamColumn = book.columns.find(c => c.id === "official_final_exam");
   const ensureFinalExam = () => {
     if (finalExamColumn) return;
     updateBook({ ...book, columns: [...book.columns, {
-      id: "official_final_exam", name: "الامتحان الأخير", max: 200, type: "امتحان نهائي",
+      id: "official_final_exam", name: "الامتحان الأخير", max: officialMax, type: "امتحان نهائي",
     }] });
   };
   const calc = (s) => {
@@ -694,7 +695,7 @@ function App() {
       const works = workCols.reduce((sum, c) => sum + (m[c.id] === "" || m[c.id] == null ? 0 : Number(m[c.id]) || 0), 0);
       const exam = m.official_final_exam === "" || m.official_final_exam == null ? null : Number(m.official_final_exam);
       const final = exam == null ? null : (works + exam) / 2;
-      return { got: final ?? works, max: 200, pct: final == null ? Math.round(works / 2 * 10) / 10 : Math.round(final / 2 * 10) / 10,
+      return { got: final ?? works, max: officialMax, pct: Math.round(((final ?? works) / officialMax) * 1000) / 10,
         works, exam, final, split: true };
     }
     return { got, max, pct: max ? Math.round((got / max) * 1000) / 10 : 0 };
@@ -1830,7 +1831,7 @@ ${sourceExcerpt}
                         اعتماد توزيع 2025–2026 ({officialGradeMaximum(grade, subject)})
                       </button>
                     )}
-                    {split200 && !finalExamColumn && <button type="button" onClick={ensureFinalExam}>إضافة الامتحان الأخير /200 وحساب المعدّل</button>}
+                    {split200 && !finalExamColumn && <button type="button" onClick={ensureFinalExam}>إضافة الامتحان الأخير وحساب المعدّل</button>}
                     <button onClick={addColumn}>
                       <Plus size={16} /> إضافة عمود
                     </button>
@@ -1874,8 +1875,8 @@ ${sourceExcerpt}
                             )}
                           </th>
                         ))}
-                        {split200 && finalExamColumn && <th>درجة الأعمال /200</th>}
-                        <th>{split200 && finalExamColumn ? "العلامة النهائية /200" : "المجموع"}</th>
+                        {split200 && finalExamColumn && <th>درجة الأعمال /{officialMax}</th>}
+                        <th>{split200 && finalExamColumn ? "العلامة النهائية /{officialMax}" : "المجموع"}</th>
                         <th>النسبة</th>
                       </tr>
                     </thead>
@@ -1899,7 +1900,7 @@ ${sourceExcerpt}
                                 />
                               </td>
                             ))}
-                            {c.split && <td><b>{c.works}/200</b></td>}
+                            {c.split && <td><b>{c.works}/{officialMax}</b></td>}
                             <td>
                               <b>
                                 {c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`}
