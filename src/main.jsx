@@ -588,10 +588,7 @@ function App() {
   );
   const bookKey = `${grade}|${section}|${subject}`;
   const book = gradebooks[bookKey] || {
-    columns:
-      subject === "العلوم العامة" && GENERAL_SCIENCE_GRADES.includes(grade)
-        ? scienceTotalColumns
-        : (officialGradeColumns(grade, subject) || seedColumns),
+    columns: officialGradeColumns(grade, subject) || seedColumns,
     marks: {},
   };
   const updateBook = (next) =>
