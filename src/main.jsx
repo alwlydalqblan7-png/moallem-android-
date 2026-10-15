@@ -44,6 +44,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { autoColorHtml, mergeSubjectOptions } from "./preparation-format.js";
 import { decodePdfBackupEntries } from "./backup-format.js";
+import { inspectDaftarBackup } from "./legacy-backup-inspector.js";
 import { getDailyWidgetStatus, parseStudentNames } from "./student-tools.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const HomeWidget = registerPlugin("HomeWidget");
@@ -380,6 +381,20 @@ function App() {
       window.alert("تمت استعادة البيانات. سيُعاد تحميل التطبيق الآن.");
       window.location.reload();
     } catch(err){window.alert(err?.message||"تعذرت الاستعادة");}
+  };
+  const [legacyBackupReport, setLegacyBackupReport] = useState(null);
+  const [legacyBackupError, setLegacyBackupError] = useState("");
+  const inspectLegacyBackupFile = async (file) => {
+    if (!file) return;
+    setLegacyBackupReport(null);
+    setLegacyBackupError("");
+    try {
+      if (file.size > 20 * 1024 * 1024) throw new Error("الملف أكبر من 20 ميغابايت؛ افحصه على جهاز آمن قبل المتابعة");
+      const payload = JSON.parse(await file.text());
+      setLegacyBackupReport(inspectDaftarBackup(payload));
+    } catch (error) {
+      setLegacyBackupError(error?.message || "تعذر فحص النسخة");
+    }
   };
   const [tab, setTab] = useState("home");
   const [grades, setGrades] = useState(() => load("m2_grades", DEFAULT_GRADES));
@@ -2424,6 +2439,16 @@ ${sourceExcerpt}
                 <details className="settings-section"><summary>٦. إعدادات دفتر التحضير والطباعة</summary><p className="note">الألوان الافتراضية: الأزرق للعناوين، الأحمر للملاحظات والتنبيهات، الأخضر للأهداف والأنشطة، والأسود للنص الأساسي. يمكن تغيير لون نص محدد من شريط المحرر وإعادة اللون التلقائي.</p><p className="note">لم نعثر في ملفات المشروع أو البحث بالمصادر الرسمية على نموذج تحضير وزاري منشور لعام 2026–2027. لذلك أبقينا الطباعة قالبًا عامًا قابلًا للتخصيص، ولم نسمِّه نموذجًا رسميًا.</p></details>
                 <details className="settings-section"><summary>٧. توقيع المعلم</summary><SignaturePad value={schoolSettings.signature || ""} onChange={signature=>setSchoolSettings(v=>({...v,signature}))}/><p className="note">ارسم توقيعك بالإصبع. يظهر في طباعة التحضير العام.</p></details>
                 <details className="settings-section"><summary>٨. النسخ الاحتياطي والاستعادة</summary><p className="note">تتضمن النسخة بيانات الطلاب والعلامات والتحاضير والإعدادات والتوقيع وملفات كتب PDF المخزنة محلياً.</p><div className="settings-actions"><button type="button" onClick={exportSettingsBackup}>تنزيل نسخة احتياطية</button><label className="restore-file">استعادة نسخة احتياطية<input type="file" accept=".json,application/json" onChange={e=>importSettingsBackup(e.target.files?.[0])}/></label></div><p className="note">تطلب الاستعادة تأكيداً قبل استبدال البيانات الموجودة.</p></details>
+                <details className="settings-section"><summary>٩. فحص نسخة دفتر التحضير — دون استيراد</summary>
+                  <p className="note">اختر نسخة دفتر التحضير العامة بصيغة JSON. يعرض الفحص أعداد السجلات فقط، ولا يحفظ الملف أو ينقل بياناته أو يغيّر أي شيء في معلّم.</p>
+                  <label className="restore-file">اختيار نسخة للفحص فقط<input type="file" accept=".json,application/json" onChange={e=>{inspectLegacyBackupFile(e.target.files?.[0]);e.target.value="";}}/></label>
+                  {legacyBackupError && <p role="alert" className="note">{legacyBackupError}</p>}
+                  {legacyBackupReport && <div role="status" className="note">
+                    <p>تم فحص نسخة دفتر التحضير (الإصدار {legacyBackupReport.version}).</p>
+                    <ul>{legacyBackupReport.sections.map(section=><li key={section.key}>{section.key}: {section.count} سجل/عنصر</li>)}</ul>
+                    <ul>{legacyBackupReport.warnings.map(warning=><li key={warning}>{warning}</li>)}</ul>
+                  </div>}
+                </details>
                 <details className="settings-section"><summary>إدارة الصفوف والشُعب</summary><Config title="الصفوف" items={grades} kind="الصف" add={() => addItem("الصف")} rename={renameItem} remove={removeItem}/><Config title="الشُعب" items={sections} kind="الشعبة" add={() => addItem("الشعبة")} rename={renameItem} remove={removeItem}/></details>
               </section>
             )}
