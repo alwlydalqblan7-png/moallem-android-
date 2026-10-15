@@ -17,6 +17,14 @@ const standard = [
 export function officialGradeColumns(grade, subject) {
   const max = grades[grade]?.[subject];
   if (!max) return null;
+  if (subject === "العلوم العامة") {
+    return ["العلوم", "الفيزياء والكيمياء"].flatMap((part, group) => standard.map(([name, percent], index) => ({
+      id: "official_science_" + group + "_" + index,
+      name: part + " — " + name,
+      max: 200 * percent / 100,
+      type: name,
+    })));
+  }
   const parts = subject === "اللغة العربية" ? arabic : standard;
   return parts.map(([name, percent], index) => ({
     id: "official_" + index,
