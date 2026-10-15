@@ -49,6 +49,7 @@ import { inspectDaftarBackup } from "./legacy-backup-inspector.js";
 import { getDailyWidgetStatus, parseStudentNames } from "./student-tools.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const HomeWidget = registerPlugin("HomeWidget");
+const BackupFile = registerPlugin("BackupFile");
 
 const DEFAULT_GRADES = [
   "السابع",
@@ -367,18 +368,15 @@ function App() {
         format: "moallem-backup-v2", createdAt: new Date().toISOString(), data, pdfs,
       });
       const filename = "moallem-backup-" + new Date().toISOString().slice(0, 10) + ".json";
-      const file = new File([payload], filename, { type: "application/json" });
-      // Android WebViews often ignore an <a download> click. Prefer the native
-      // share sheet where supported so the user can save the file explicitly.
-      if (Capacitor.isNativePlatform() && navigator.canShare?.({ files: [file] })) {
+      if (Capacitor.isNativePlatform()) {
         try {
-          await navigator.share({ files: [file], title: "نسخة معلّم الاحتياطية" });
-          window.alert("تم فتح مشاركة النسخة. تأكد من حفظ الملف في مكان آمن.");
-          return;
+          await BackupFile.save({ filename, content: payload });
+          window.alert("تم حفظ النسخة الاحتياطية بنجاح في المكان الذي اخترته.");
         } catch (error) {
-          if (error?.name === "AbortError") return;
-          // Fall back to browser download if native sharing fails.
+          if (String(error?.message || error).includes("CANCELLED")) return;
+          window.alert("تعذر حفظ النسخة: " + (error?.message || error));
         }
+        return;
       }
       const blob = new Blob([payload], { type: "application/json" });
       const url = URL.createObjectURL(blob);
