@@ -1,0 +1,55 @@
+package __APP_PACKAGE__;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.annotation.ActivityCallback;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.PluginMethod;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+
+@CapacitorPlugin(name = "BackupFile")
+public class BackupFilePlugin extends Plugin {
+    @PluginMethod
+    public void save(PluginCall call) {
+        String filename = call.getString("filename");
+        String content = call.getString("content");
+        if (filename == null || !filename.matches("[a-zA-Z0-9._-]+\\.json") || content == null) {
+            call.reject("Invalid backup filename or content");
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.putExtra(Intent.EXTRA_TITLE, filename);
+        startActivityForResult(call, intent, "saveResult");
+    }
+
+    @ActivityCallback
+    private void saveResult(PluginCall call, android.app.ActivityResult result) {
+        if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
+            call.reject("CANCELLED");
+            return;
+        }
+        Uri uri = result.getData().getData();
+        String content = call.getString("content");
+        if (uri == null || content == null) {
+            call.reject("No destination selected");
+            return;
+        }
+        try (OutputStream out = getContext().getContentResolver().openOutputStream(uri, "wt")) {
+            if (out == null) throw new IllegalStateException("Cannot open selected file");
+            out.write(content.getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            JSObject response = new JSObject();
+            response.put("saved", true);
+            call.resolve(response);
+        } catch (Exception error) {
+            call.reject("Unable to save backup: " + error.getMessage(), error);
+        }
+    }
+}
