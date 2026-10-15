@@ -2449,6 +2449,7 @@ ${sourceExcerpt}
                   {legacyBackupError && <p role="alert" className="note">{legacyBackupError}</p>}
                   {legacyBackupReport && <div role="status" className="note">
                     <p>تم فحص نسخة دفتر التحضير (الإصدار {legacyBackupReport.version}).</p>
+                    <p><strong>مقارنة أولية قبل النقل:</strong> في معلّم حاليًا {savedPreparations.length} تحضير محفوظ، و{students.length} طالب. الأعداد لا تكفي لاكتشاف التكرارات؛ يجب فحص المعرفات قبل أي دمج.</p>
                     <ul>{legacyBackupReport.sections.map(section=><li key={section.key}>{section.key}: {section.count} سجل/عنصر</li>)}</ul>
                     <ul>{legacyBackupReport.warnings.map(warning=><li key={warning}>{warning}</li>)}</ul>
                   </div>}
