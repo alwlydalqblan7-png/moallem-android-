@@ -44,6 +44,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { autoColorHtml, mergeSubjectOptions } from "./preparation-format.js";
 import { decodePdfBackupEntries } from "./backup-format.js";
+import { mergePreparationBackup } from "./preparation-backup-import.js";
 import { getDailyWidgetStatus, parseStudentNames } from "./student-tools.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const HomeWidget = registerPlugin("HomeWidget");
@@ -380,6 +381,41 @@ function App() {
       window.alert("تمت استعادة البيانات. سيُعاد تحميل التطبيق الآن.");
       window.location.reload();
     } catch(err){window.alert(err?.message||"تعذرت الاستعادة");}
+  };
+  const importPreparationBackup = async (file) => {
+    if (!file) return;
+    try {
+      const backup = JSON.parse(await file.text());
+      const currentData = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith("m2_")) currentData[key] = localStorage.getItem(key);
+      }
+      const migration = mergePreparationBackup(backup, currentData);
+      const labels = {
+        preparations: "التحاضير",
+        annualPlan: "الخطط السنوية",
+        weeklySchedule: "الجدول الأسبوعي",
+        students: "الطلاب",
+        books: "بيانات الكتب",
+        studentNotes: "ملاحظات الطلاب (أرشفة آمنة)",
+        studentAnnualReviews: "التقويمات السنوية (أرشفة آمنة)",
+        gradebookRecords: "سجلات العلامات (أرشفة آمنة)",
+        gradebookLimits: "حدود العلامات (أرشفة آمنة)",
+        gradebookRules: "قواعد العلامات (أرشفة آمنة)",
+        appSettings: "الإعدادات القديمة (أرشفة آمنة)",
+      };
+      const summary = migration.report
+        .map((item) => `• ${labels[item.section] || item.section}: ${item.imported ?? item.archived} ${item.kind === "archive" ? "عنصر محفوظ بالأرشيف" : "عنصر مضاف"}${item.duplicates ? `، ${item.duplicates} مكرر تم تجاوزه` : ""}`)
+        .join("\n");
+      const warnings = migration.warnings.length ? `\n\nتنبيهات:\n${migration.warnings.map((warning) => `• ${warning}`).join("\n")}` : "";
+      if (!window.confirm(`سيُدمج محتوى نسخة دفتر التحضير مع بيانات معلّم الموجودة دون حذفها.\n\n${summary}${warnings}\n\nهل تريد المتابعة؟`)) return;
+      for (const [key, value] of Object.entries(migration.data)) localStorage.setItem(key, value);
+      window.alert("اكتمل دمج بيانات نسخة دفتر التحضير. أُبقيت البيانات الموجودة، وسيُعاد تحميل معلّم الآن.");
+      window.location.reload();
+    } catch (error) {
+      window.alert(error?.message || "تعذر دمج نسخة دفتر التحضير");
+    }
   };
   const [tab, setTab] = useState("home");
   const [grades, setGrades] = useState(() => load("m2_grades", DEFAULT_GRADES));
@@ -2423,7 +2459,7 @@ ${sourceExcerpt}
                 <details className="settings-section"><summary>٥. التنبيهات الصوتية</summary>{[["enabled","تفعيل التنبيهات"],["start","تنبيه بداية الحصة"],["end","تنبيه نهاية الحصة"]].map(([key,label])=><label className="setting-check" key={key}><input type="checkbox" checked={Boolean(soundSettings[key])} onChange={e=>setSoundSettings(v=>({...v,[key]:e.target.checked}))}/>{label}</label>)}<button type="button" className="primary" onClick={scheduleClassNotifications}><Bell size={16}/> جدولة تنبيهات الأسبوع</button>{notificationMessage && <p className="note" role="status">{notificationMessage}</p>}<p className="note">تُجدول تنبيهات محلية في Android. قد يؤخر وضع توفير الطاقة الإشعار، وقد يتطلب Android 12+ السماح بالتنبيهات الدقيقة.</p></details>
                 <details className="settings-section"><summary>٦. إعدادات دفتر التحضير والطباعة</summary><p className="note">الألوان الافتراضية: الأزرق للعناوين، الأحمر للملاحظات والتنبيهات، الأخضر للأهداف والأنشطة، والأسود للنص الأساسي. يمكن تغيير لون نص محدد من شريط المحرر وإعادة اللون التلقائي.</p><p className="note">لم نعثر في ملفات المشروع أو البحث بالمصادر الرسمية على نموذج تحضير وزاري منشور لعام 2026–2027. لذلك أبقينا الطباعة قالبًا عامًا قابلًا للتخصيص، ولم نسمِّه نموذجًا رسميًا.</p></details>
                 <details className="settings-section"><summary>٧. توقيع المعلم</summary><SignaturePad value={schoolSettings.signature || ""} onChange={signature=>setSchoolSettings(v=>({...v,signature}))}/><p className="note">ارسم توقيعك بالإصبع. يظهر في طباعة التحضير العام.</p></details>
-                <details className="settings-section"><summary>٨. النسخ الاحتياطي والاستعادة</summary><p className="note">تتضمن النسخة بيانات الطلاب والعلامات والتحاضير والإعدادات والتوقيع وملفات كتب PDF المخزنة محلياً.</p><div className="settings-actions"><button type="button" onClick={exportSettingsBackup}>تنزيل نسخة احتياطية</button><label className="restore-file">استعادة نسخة احتياطية<input type="file" accept=".json,application/json" onChange={e=>importSettingsBackup(e.target.files?.[0])}/></label></div><p className="note">تطلب الاستعادة تأكيداً قبل استبدال البيانات الموجودة.</p></details>
+                <details className="settings-section"><summary>٨. النسخ الاحتياطي والاستعادة</summary><p className="note">تتضمن النسخة بيانات الطلاب والعلامات والتحاضير والإعدادات والتوقيع وملفات كتب PDF المخزنة محلياً.</p><div className="settings-actions"><button type="button" onClick={exportSettingsBackup}>تنزيل نسخة احتياطية</button><label className="restore-file">استعادة نسخة معلّم<input type="file" accept=".json,application/json" onChange={e=>{const file=e.target.files?.[0];e.target.value="";importSettingsBackup(file)}}/></label><label className="restore-file">دمج نسخة دفتر التحضير<input type="file" accept=".json,application/json" onChange={e=>{const file=e.target.files?.[0];e.target.value="";importPreparationBackup(file)}}/></label></div><p className="note">استعادة نسخة معلّم تستبدل بياناته بعد التأكيد. دمج نسخة دفتر التحضير يضيف التحاضير والطلاب والخطط والجدول وبيانات الكتب دون حذف بيانات معلّم، ويحفظ الأقسام الأخرى في أرشيف ضمن النسخ الاحتياطي.</p></details>
                 <details className="settings-section"><summary>إدارة الصفوف والشُعب</summary><Config title="الصفوف" items={grades} kind="الصف" add={() => addItem("الصف")} rename={renameItem} remove={removeItem}/><Config title="الشُعب" items={sections} kind="الشعبة" add={() => addItem("الشعبة")} rename={renameItem} remove={removeItem}/></details>
               </section>
             )}
