@@ -1,3 +1,4 @@
+import { officialGradeColumns, officialGradeMaximum } from "./official-grade-distribution.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -590,11 +591,22 @@ function App() {
     columns:
       subject === "العلوم العامة" && GENERAL_SCIENCE_GRADES.includes(grade)
         ? scienceTotalColumns
-        : seedColumns,
+        : (officialGradeColumns(grade, subject) || seedColumns),
     marks: {},
   };
   const updateBook = (next) =>
     setGradebooks((g) => ({ ...g, [bookKey]: next }));
+  const applyOfficialDistribution = () => {
+    const columns = officialGradeColumns(grade, subject);
+    if (!columns) return;
+    const hasMarks = Object.values(book.marks || {}).some(row =>
+      Object.values(row || {}).some(value => value !== "" && value != null));
+    if (hasMarks) {
+      window.alert("هذا الدفتر يحتوي على علامات محفوظة. حفاظًا عليها، لا يمكن استبدال أعمدته تلقائيًا. أنشئ نسخة احتياطية وعدّل الأعمدة يدويًا.");
+      return;
+    }
+    updateBook({ ...book, columns });
+  };
   const addColumn = () =>
     updateBook({
       ...book,
@@ -1766,6 +1778,11 @@ ${sourceExcerpt}
                 </div>
                 {editMode && (
                   <div className="column-tools">
+                    {officialGradeMaximum(grade, subject) != null && (
+                      <button type="button" onClick={applyOfficialDistribution}>
+                        اعتماد توزيع 2025–2026 ({officialGradeMaximum(grade, subject)})
+                      </button>
+                    )}
                     <button onClick={addColumn}>
                       <Plus size={16} /> إضافة عمود
                     </button>
