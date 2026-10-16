@@ -87,6 +87,222 @@ const DEFAULT_SUBJECTS = [
   "التربية الرياضية",
 ];
 const ADDED_SUBJECTS = ["العلوم", "الفيزياء والكيمياء"];
+// The teacher's documented 25 weekly lessons. Null cells represent free periods.
+// The user's saved timetable always takes precedence over this initial seed.
+const SCHOOL_WEEKLY_SCHEDULE_2026 = {
+  "الإثنين": [
+    {
+      "id": "school-2026-1-1",
+      "grade": "الأول الثانوي",
+      "section": "",
+      "subject": "المعلوماتية",
+      "time": "08:00–08:40",
+      "note": "المعلوماتية — الأول الثانوي (08:00–08:40)"
+    },
+    {
+      "id": "school-2026-1-2",
+      "grade": "السابع",
+      "section": "الثانية",
+      "subject": "علم الأحياء",
+      "time": "08:40–09:20",
+      "note": "علم الأحياء — السابع – الثانية (08:40–09:20)"
+    },
+    null,
+    {
+      "id": "school-2026-1-4",
+      "grade": "التاسع",
+      "section": "الثانية",
+      "subject": "التربية الرياضية",
+      "time": "10:15–10:55",
+      "note": "التربية الرياضية — التاسع – الثانية (10:15–10:55)"
+    },
+    {
+      "id": "school-2026-1-5",
+      "grade": "السابع",
+      "section": "الثانية",
+      "subject": "التربية الرياضية",
+      "time": "10:55–11:35",
+      "note": "التربية الرياضية — السابع – الثانية (10:55–11:35)"
+    },
+    {
+      "id": "school-2026-1-6",
+      "grade": "الأول الثانوي",
+      "section": "",
+      "subject": "الرياضيات",
+      "time": "11:50–12:25",
+      "note": "الرياضيات — الأول الثانوي (11:50–12:25)"
+    },
+    {
+      "id": "school-2026-1-7",
+      "grade": "الثاني الثانوي",
+      "section": "",
+      "subject": "المعلوماتية",
+      "time": "12:25–13:00",
+      "note": "المعلوماتية — الثاني الثانوي (12:25–13:00)"
+    }
+  ],
+  "الثلاثاء": [
+    null,
+    {
+      "id": "school-2026-2-2",
+      "grade": "الثاني الثانوي",
+      "section": "",
+      "subject": "التربية الرياضية",
+      "time": "08:40–09:20",
+      "note": "التربية الرياضية — الثاني الثانوي (08:40–09:20)"
+    },
+    {
+      "id": "school-2026-2-3",
+      "grade": "الثامن",
+      "section": "الثانية",
+      "subject": "علم الأحياء",
+      "time": "09:20–10:00",
+      "note": "علم الأحياء — الثامن – الثانية (09:20–10:00)"
+    },
+    {
+      "id": "school-2026-2-4",
+      "grade": "الثامن",
+      "section": "الثانية",
+      "subject": "المعلوماتية",
+      "time": "10:15–10:55",
+      "note": "المعلوماتية — الثامن – الثانية (10:15–10:55)"
+    },
+    {
+      "id": "school-2026-2-5",
+      "grade": "الثامن",
+      "section": "الأولى",
+      "subject": "التربية الرياضية",
+      "time": "10:55–11:35",
+      "note": "التربية الرياضية — الثامن – الأولى (10:55–11:35)"
+    },
+    {
+      "id": "school-2026-2-6",
+      "grade": "السابع",
+      "section": "الثانية",
+      "subject": "علم الأحياء",
+      "time": "11:50–12:25",
+      "note": "علم الأحياء — السابع – الثانية (11:50–12:25)"
+    },
+    {
+      "id": "school-2026-2-7",
+      "grade": "الثامن",
+      "section": "الثانية",
+      "subject": "التربية الرياضية",
+      "time": "12:25–13:00",
+      "note": "التربية الرياضية — الثامن – الثانية (12:25–13:00)"
+    }
+  ],
+  "الأربعاء": [
+    {
+      "id": "school-2026-3-1",
+      "grade": "السابع",
+      "section": "الثانية",
+      "subject": "المعلوماتية",
+      "time": "08:00–08:40",
+      "note": "المعلوماتية — السابع – الثانية (08:00–08:40)"
+    },
+    null,
+    {
+      "id": "school-2026-3-3",
+      "grade": "الثامن",
+      "section": "الثانية",
+      "subject": "علم الأحياء",
+      "time": "09:20–10:00",
+      "note": "علم الأحياء — الثامن – الثانية (09:20–10:00)"
+    },
+    {
+      "id": "school-2026-3-4",
+      "grade": "السابع",
+      "section": "الأولى",
+      "subject": "علم الأحياء",
+      "time": "10:15–10:55",
+      "note": "علم الأحياء — السابع – الأولى (10:15–10:55)"
+    },
+    {
+      "id": "school-2026-3-5",
+      "grade": "الثامن",
+      "section": "الأولى",
+      "subject": "علم الأحياء",
+      "time": "10:55–11:35",
+      "note": "علم الأحياء — الثامن – الأولى (10:55–11:35)"
+    },
+    {
+      "id": "school-2026-3-6",
+      "grade": "السابع",
+      "section": "الأولى",
+      "subject": "المعلوماتية",
+      "time": "11:50–12:25",
+      "note": "المعلوماتية — السابع – الأولى (11:50–12:25)"
+    },
+    {
+      "id": "school-2026-3-7",
+      "grade": "الثامن",
+      "section": "الأولى",
+      "subject": "المعلوماتية",
+      "time": "12:25–13:00",
+      "note": "المعلوماتية — الثامن – الأولى (12:25–13:00)"
+    }
+  ],
+  "الخميس": [
+    {
+      "id": "school-2026-4-1",
+      "grade": "الأول الثانوي",
+      "section": "",
+      "subject": "المعلوماتية",
+      "time": "08:00–08:40",
+      "note": "المعلوماتية — الأول الثانوي (08:00–08:40)"
+    },
+    {
+      "id": "school-2026-4-2",
+      "grade": "الثاني الثانوي",
+      "section": "",
+      "subject": "الرياضيات",
+      "time": "08:40–09:20",
+      "note": "الرياضيات — الثاني الثانوي (08:40–09:20)"
+    },
+    {
+      "id": "school-2026-4-3",
+      "grade": "السابع",
+      "section": "الأولى",
+      "subject": "التربية الرياضية",
+      "time": "09:20–10:00",
+      "note": "التربية الرياضية — السابع – الأولى (09:20–10:00)"
+    },
+    {
+      "id": "school-2026-4-4",
+      "grade": "التاسع",
+      "section": "الأولى",
+      "subject": "التربية الرياضية",
+      "time": "10:15–10:55",
+      "note": "التربية الرياضية — التاسع – الأولى (10:15–10:55)"
+    },
+    {
+      "id": "school-2026-4-5",
+      "grade": "الأول الثانوي",
+      "section": "",
+      "subject": "الرياضيات",
+      "time": "10:55–11:35",
+      "note": "الرياضيات — الأول الثانوي (10:55–11:35)"
+    },
+    {
+      "id": "school-2026-4-6",
+      "grade": "الثامن",
+      "section": "الأولى",
+      "subject": "علم الأحياء",
+      "time": "11:50–12:25",
+      "note": "علم الأحياء — الثامن – الأولى (11:50–12:25)"
+    },
+    {
+      "id": "school-2026-4-7",
+      "grade": "السابع",
+      "section": "الأولى",
+      "subject": "علم الأحياء",
+      "time": "12:25–13:00",
+      "note": "علم الأحياء — السابع – الأولى (12:25–13:00)"
+    }
+  ]
+};
+
 const seedStudents = [
   { id: 1, name: "أحمد محمد", grade: "السابع", section: "أ" },
   { id: 2, name: "سارة خالد", grade: "السابع", section: "أ" },
@@ -509,9 +725,13 @@ function App() {
     load("m2_curriculum_plans", []),
   );
   const WEEK_DAYS = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس"];
-  const [weeklySchedule, setWeeklySchedule] = useState(() =>
-    load("m2_weekly_schedule", {}),
-  );
+  // Seed the documented school timetable only on a genuinely unused schedule.
+  // Never overwrite any existing schedule object, including one with empty cells.
+  const [weeklySchedule, setWeeklySchedule] = useState(() => {
+    const existing = load("m2_weekly_schedule", {});
+    if (existing && typeof existing === "object" && !Array.isArray(existing) && Object.keys(existing).length > 0) return existing;
+    return SCHOOL_WEEKLY_SCHEDULE_2026;
+  });
   const [scheduleEffectiveDate, setScheduleEffectiveDate] = useState(() => load("m2_schedule_effective_date", ""));
   useEffect(() => persist("m2_schedule_effective_date", scheduleEffectiveDate), [scheduleEffectiveDate]);
   const getSchedulePeriod = (day, index) => (weeklySchedule[day] || [])[index] || null;
