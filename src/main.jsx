@@ -48,6 +48,7 @@ import { validateMoallemBackup } from "./backup-format.js";
 import { inspectDaftarBackup } from "./legacy-backup-inspector.js";
 import { getDailyWidgetStatus, parseStudentNames } from "./student-tools.js";
 import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
+import { DISTINCT_SCIENCE_SUBJECTS, parentGradeMessage, shareParentGrade } from "./parent-grade-sharing.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const HomeWidget = registerPlugin("HomeWidget");
 const BackupFile = registerPlugin("BackupFile");
@@ -627,6 +628,7 @@ function App() {
     () => libraryBooks.filter((b) => b.grade === grade),
     [libraryBooks, grade],
   );
+  // The subject is part of the storage key: science, physics and chemistry never share marks.
   const bookKey = `${grade}|${section}|${subject}`;
   const book = gradebooks[bookKey] || {
     columns: officialGradeColumns(grade, subject) || seedColumns,
@@ -1391,6 +1393,28 @@ ${sourceExcerpt}
       w.document.close();
     }
   };
+  const shareStudentMarks = async (student) => {
+    const assessments = book.columns.map((column) => ({
+      name: column.name,
+      max: column.max,
+      value: book.marks[student.id]?.[column.id],
+    }));
+    if (!assessments.some((item) => item.value !== "" && item.value != null)) {
+      alert("لا توجد علامات مدخلة لهذا الطالب بعد.");
+      return;
+    }
+    const message = parentGradeMessage({
+      studentName: student.name, grade, section, subject, assessments,
+      teacherName: subjectTeachers[subject] || schoolSettings.teacher || "",
+    });
+    if (!window.confirm(`مشاركة علامات ${student.name} فقط؟ تحقق من هوية ولي الأمر قبل الإرسال.`)) return;
+    try {
+      const result = await shareParentGrade(message);
+      if (result === "copied") alert("تم نسخ علامات الطالب. افتح واتساب والصق الرسالة لولي الأمر الصحيح.");
+    } catch (error) {
+      if (error?.name !== "AbortError") alert("تعذرت المشاركة على هذا الجهاز: " + (error?.message || ""));
+    }
+  };
   const printGradebook = () =>
     printDocument("دفتر العلامات", buildGradebookHtml());
   const printReportCards = () =>
@@ -1825,6 +1849,14 @@ ${sourceExcerpt}
                     </button>
                   </div>
                 </div>
+                <div className="column-tools" aria-label="اختيار دفتر المادة">
+                  {DISTINCT_SCIENCE_SUBJECTS.map((item) => (
+                    <button key={item} type="button" disabled={subject === item} onClick={() => setSubject(item)}>
+                      {item}{subject === item ? " ✓" : ""}
+                    </button>
+                  ))}
+                  <span>لكل مادة دفتر مستقل؛ لا تُنقل العلامات القديمة تلقائيًا.</span>
+                </div>
                 {editMode && (
                   <div className="column-tools">
                     {officialGradeMaximum(grade, subject) != null && (
@@ -1879,6 +1911,7 @@ ${sourceExcerpt}
                         {split200 && finalExamColumn && <th>درجة الأعمال /{officialMax}</th>}
                         <th>{split200 && finalExamColumn ? "العلامة النهائية /{officialMax}" : "المجموع"}</th>
                         <th>النسبة</th>
+                        <th>مشاركة ولي الأمر</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1910,6 +1943,7 @@ ${sourceExcerpt}
                             <td>
                               <b>{c.pct}%</b>
                             </td>
+                            <td><button type="button" onClick={() => shareStudentMarks(s)} aria-label={`مشاركة علامات ${s.name}`}>مشاركة عبر واتساب</button></td>
                           </tr>
                         );
                       })}
