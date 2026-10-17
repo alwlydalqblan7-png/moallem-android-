@@ -2,6 +2,8 @@ name: Build Moallem Safe APK
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [feature/parent-grade-sharing-science-split]
   push:
     branches: [main, feature/official-preparation-2026-2027, feature/safe-preparation-integration, feature/parent-grade-sharing-science-split, feature/isolated-preview-safe-install-20261017]
 
