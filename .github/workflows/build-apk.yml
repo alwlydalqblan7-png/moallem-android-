@@ -3,7 +3,7 @@ name: Build Moallem Safe APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/official-preparation-2026-2027, feature/safe-preparation-integration]
+    branches: [main, feature/official-preparation-2026-2027, feature/safe-preparation-integration, feature/parent-grade-sharing-science-split]
 
 jobs:
   build:
