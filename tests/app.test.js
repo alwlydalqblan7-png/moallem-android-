@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { autoColorHtml, mergeSubjectOptions } from "../src/preparation-format.js";
 import { decodePdfBackupEntries, validateMoallemBackup } from "../src/backup-format.js";
 import { attendanceDateKey, formatClassRoster, getDailyWidgetStatus, parseStudentNames, summarizeAttendance } from "../src/student-tools.js";
+import { getWidgetDay, widgetDayIndex } from "../src/widget-schedule.js";
 
 test("subject migration adds new options without removing or renaming legacy subjects", () => {
   const old = ["العلوم العامة", "الفيزياء", "الكيمياء", "العربية"];
@@ -64,6 +65,20 @@ test("home widget status follows configured lesson times and school days", () =>
   assert.match(getDailyWidgetStatus(periods, new Date(2026, 9, 14, 11, 0)).status, /انتهت حصصك اليوم/);
   assert.equal(getDailyWidgetStatus(periods, new Date(2026, 9, 16, 9, 0)).state, "holiday");
   assert.equal(getDailyWidgetStatus([], new Date(2026, 9, 14, 7, 0)).state, "unconfigured");
+});
+
+test("weekly widget shows selected lesson subject, grade, section, and empty remaining periods", () => {
+  const result = getWidgetDay({ "الثلاثاء": [
+    { subject: "العلوم", grade: "الثامن", section: "أ" },
+    { note: "مراجعة الفصل" },
+  ] }, 2);
+  assert.equal(result.day, "الثلاثاء");
+  assert.equal(result.periods[0].text, "العلوم — الصف الثامن — الشعبة أ");
+  assert.equal(result.periods[1].text, "مراجعة الفصل");
+  assert.equal(result.periods[6].number, 7);
+  assert.equal(result.periods[6].text, "");
+  assert.equal(widgetDayIndex(new Date(2026, 9, 18)), 0); // Sunday
+  assert.equal(widgetDayIndex(new Date(2026, 9, 17)), 0); // Saturday defaults to Sunday
 });
 
 test("class sharing exports only the selected section in its existing order", () => {

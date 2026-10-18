@@ -49,6 +49,7 @@ import { validateMoallemBackup } from "./backup-format.js";
 import { inspectDaftarBackup } from "./legacy-backup-inspector.js";
 import { attendanceDateKey, formatClassRoster, getDailyWidgetStatus, parseStudentNames, summarizeAttendance } from "./student-tools.js";
 import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
+import { calculateSciencePairSummary } from "./science-summary.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const HomeWidget = registerPlugin("HomeWidget");
 const BackupFile = registerPlugin("BackupFile");
@@ -449,7 +450,7 @@ function App() {
     const openRoute = (url) => {
       try {
         const path = new URL(url).pathname.replace(/^\//, "");
-        const routes = { home: "home", gradebook: "gradebook", attendance: "attendance", preparation: "ai", board: "board" };
+        const routes = { home: "home", gradebook: "gradebook", attendance: "attendance", preparation: "ai", board: "board", schedule: "schedule" };
         if (routes[path]) setTab(routes[path]);
       } catch {}
     };
@@ -608,6 +609,12 @@ function App() {
     () => persist("m2_weekly_schedule", weeklySchedule),
     [weeklySchedule],
   );
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    HomeWidget.syncSchedule({ schedule: weeklySchedule }).catch((error) => {
+      console.warn("تعذرت مزامنة البرنامج مع ويدجت أندرويد", error);
+    });
+  }, [weeklySchedule]);
   useEffect(
     () => persist("m2_saved_preparations", savedPreparations),
     [savedPreparations],
@@ -723,6 +730,7 @@ function App() {
     }
     return { got, max, pct: max ? Math.round((got / max) * 1000) / 10 : 0 };
   };
+  const showSciencePairSummary = subject === "العلوم" || subject === "الفيزياء والكيمياء" || subject === "العلوم العامة";
   const addStudent = () =>
     setStudents((x) => [
       ...x,
@@ -1944,11 +1952,19 @@ ${sourceExcerpt}
                         {split200 && finalExamColumn && <th>درجة الأعمال /{officialMax}</th>}
                         <th>{split200 && finalExamColumn ? "العلامة النهائية /{officialMax}" : "المجموع"}</th>
                         <th>النسبة</th>
+                        {showSciencePairSummary && <>
+                          <th>محصلة العلوم</th>
+                          <th>محصلة الفيزياء والكيمياء</th>
+                          <th>مجموع المحصلتين</th>
+                        </>}
                       </tr>
                     </thead>
                     <tbody>
                       {classStudents.map((s, i) => {
                         const c = calc(s);
+                        const pair = showSciencePairSummary
+                          ? calculateSciencePairSummary(gradebooks, grade, section, s.id, officialGradeMaximum)
+                          : null;
                         return (
                           <tr key={s.id}>
                             <td>{i + 1}</td>
@@ -1975,6 +1991,11 @@ ${sourceExcerpt}
                             <td>
                               <b>{c.pct}%</b>
                             </td>
+                            {pair && <>
+                              <td><b>{pair.science ?? "—"}</b></td>
+                              <td><b>{pair.physicsChemistry ?? "—"}</b></td>
+                              <td><b>{pair.total ?? "—"}</b></td>
+                            </>}
                           </tr>
                         );
                       })}

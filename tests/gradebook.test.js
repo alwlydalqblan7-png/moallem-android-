@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { calculateGradebookTotals, normalizeMarkInput } from "../src/gradebook.js";
+import { calculateSciencePairSummary } from "../src/science-summary.js";
 
 test("gradebook uses full configured maximum even while some assessments are ungraded", () => {
   const result = calculateGradebookTotals(
@@ -35,4 +36,16 @@ test("official general science components total their configured subject maximum
     ],
   );
   assert.deepEqual(result, { earned: 310, maximum: 400 });
+});
+
+test("science and physics-chemistry results remain separate and are summed without rounding", () => {
+  const gradebooks = {
+    "الثامن|أ|العلوم": { columns: [{ id: "oral", max: 20 }, { id: "exam", max: 40 }], marks: { 12: { oral: 15.5, exam: 30.5 } } },
+    "الثامن|أ|الفيزياء والكيمياء": { columns: [{ id: "work", max: 50 }, { id: "exam", max: 50 }], marks: { 12: { work: 44.25, exam: 35.75 } } },
+  };
+  const summary = calculateSciencePairSummary(gradebooks, "الثامن", "أ", 12);
+  assert.equal(summary.science, 46);
+  assert.equal(summary.physicsChemistry, 80);
+  assert.equal(summary.total, 126);
+  assert.deepEqual(gradebooks["الثامن|أ|العلوم"].marks[12], { oral: 15.5, exam: 30.5 });
 });
