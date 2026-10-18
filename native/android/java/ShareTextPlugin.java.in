@@ -1,0 +1,25 @@
+package __APP_PACKAGE__;
+
+import android.content.Intent;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+
+@CapacitorPlugin(name = "ShareText")
+public class ShareTextPlugin extends Plugin {
+    @PluginMethod
+    public void share(PluginCall call) {
+        String text = call.getString("text", "");
+        String title = call.getString("title", "مشاركة من معلّم");
+        if (text.trim().isEmpty()) {
+            call.reject("لا يوجد نص لمشاركته");
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TEXT, text);
+        getActivity().startActivity(Intent.createChooser(intent, title));
+        call.resolve();
+    }
+}
