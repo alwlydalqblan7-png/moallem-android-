@@ -14,6 +14,20 @@ export function calculateSubjectResult(book, studentId, officialMaximum = null) 
       : normalizeMarkInput(examMark, examColumn.max);
     return { value: exam == null ? work : (work + exam) / 2, maximum: Number(officialMaximum), pendingExam: exam == null };
   }
+  const examColumns = columns.filter((column) =>
+    column.id === "official_final_exam" || /امتحان/.test(`${column.type || ""} ${column.name || ""}`),
+  );
+  if (examColumns.length) {
+    const exams = new Set(examColumns.map((column) => column.id));
+    const workTotals = calculateGradebookTotals(marks, columns.filter((column) => !exams.has(column.id)));
+    const examTotals = calculateGradebookTotals(marks, examColumns);
+    const hasExamMark = examColumns.some((column) => marks[column.id] !== "" && marks[column.id] != null);
+    return {
+      value: hasExamMark ? (workTotals.earned + examTotals.earned) / 2 : workTotals.earned,
+      maximum: hasExamMark || examColumns.length ? (workTotals.maximum + examTotals.maximum) / 2 : workTotals.maximum,
+      pendingExam: !hasExamMark,
+    };
+  }
   return calculateGradebookTotals(marks, columns);
 }
 

@@ -49,7 +49,7 @@ import { validateMoallemBackup } from "./backup-format.js";
 import { inspectDaftarBackup } from "./legacy-backup-inspector.js";
 import { attendanceDateKey, formatClassRoster, getDailyWidgetStatus, parseStudentNames, summarizeAttendance } from "./student-tools.js";
 import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
-import { calculateSciencePairSummary } from "./science-summary.js";
+import { calculateSciencePairSummary, calculateSubjectResult } from "./science-summary.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const HomeWidget = registerPlugin("HomeWidget");
 const BackupFile = registerPlugin("BackupFile");
@@ -727,6 +727,12 @@ function App() {
       const final = exam == null ? null : (works + exam) / 2;
       return { got: final ?? works, max: officialMax, pct: Math.round(((final ?? works) / officialMax) * 1000) / 10,
         works, exam, final, split: true };
+    }
+    if (subject === "العلوم" || subject === "الفيزياء والكيمياء") {
+      const result = calculateSubjectResult(book, s.id, officialMax);
+      const max = result.maximum ?? 0;
+      return { got: result.value ?? result.earned, max, pct: max ? Math.round(((result.value ?? result.earned) / max) * 1000) / 10 : 0,
+        works: result.value ?? result.earned, exam: null, final: result.value ?? result.earned, split: true, pendingExam: result.pendingExam };
     }
     return { got, max, pct: max ? Math.round((got / max) * 1000) / 10 : 0 };
   };
