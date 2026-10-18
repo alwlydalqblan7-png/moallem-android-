@@ -17,17 +17,26 @@ const copyTemplate = (source, destination, replacements = {}) => {
 copyTemplate("native/android/java/MainActivity.java.in", join(javaDir, "MainActivity.java"), { "__APP_PACKAGE__": appId });
 copyTemplate("native/android/java/HomeWidgetPlugin.java.in", join(javaDir, "HomeWidgetPlugin.java"), { "__APP_PACKAGE__": appId });
 copyTemplate("native/android/java/BackupFilePlugin.java.in", join(javaDir, "BackupFilePlugin.java"), { "__APP_PACKAGE__": appId });
+copyTemplate("native/android/java/ShareTextPlugin.java.in", join(javaDir, "ShareTextPlugin.java"), { "__APP_PACKAGE__": appId });
 copyTemplate("native/android/java/HomeWidgetProvider.java.in", join(javaDir, "HomeWidgetProvider.java"), { "__APP_PACKAGE__": appId });
 for (const resource of [
   "res/layout/moallem_widget.xml",
   "res/drawable/moallem_widget_background.xml",
   "res/drawable/moallem_widget_today.xml",
   "res/xml/moallem_widget_info.xml",
+  "res/values/moallem_widget_styles.xml",
 ]) {
   copyTemplate(join("native/android", resource), join(androidRoot, resource));
 }
 
 let manifest = readFileSync(manifestPath, "utf8");
+if (!manifest.includes('android:scheme="moallem" android:host="open"')) {
+  const activityClose = manifest.indexOf("</activity>");
+  if (activityClose < 0) throw new Error("AndroidManifest.xml is missing its main activity");
+  const deepLink = `            <intent-filter>\n                <action android:name="android.intent.action.VIEW" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <category android:name="android.intent.category.BROWSABLE" />\n                <data android:scheme="moallem" android:host="open" />\n            </intent-filter>\n        `;
+  manifest = manifest.slice(0, activityClose) + deepLink + manifest.slice(activityClose);
+  writeFileSync(manifestPath, manifest);
+}
 const permission = '    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />';
 if (!manifest.includes("android.permission.SCHEDULE_EXACT_ALARM")) {
   if (!manifest.includes("<application")) throw new Error("AndroidManifest.xml is missing the application element");
@@ -52,6 +61,9 @@ if (!strings.includes("name=\"moallem_widget_description\"")) {
 // environment. Debug builds need no signing secret.
 const appBuildPath = "android/app/build.gradle";
 let appBuild = readFileSync(appBuildPath, "utf8");
+if (!appBuild.includes('applicationIdSuffix ".test"')) {
+  appBuild = appBuild.replace("buildTypes {", 'buildTypes {\n        debug {\n            // Install test builds beside production without touching its app data.\n            applicationIdSuffix ".test"\n        }');
+}
 const versionCode = Number(process.env.MOALLEM_VERSION_CODE || 1);
 if (!Number.isSafeInteger(versionCode) || versionCode < 1) throw new Error("MOALLEM_VERSION_CODE must be a positive integer");
 const versionName = process.env.MOALLEM_VERSION_NAME || `2.7.${versionCode}`;

@@ -21,6 +21,30 @@ export function parseStudentNames(raw) {
     .filter((name) => name && !headerNames.has(name.toLocaleLowerCase("ar")));
 }
 
+export function formatClassRoster(students, grade, section) {
+  const roster = (Array.isArray(students) ? students : [])
+    .filter((student) => student.grade === grade && student.section === section)
+    .map((student, index) => `${index + 1}. ${String(student.name || "").trim()}`)
+    .filter((line) => !/^\d+\.\s*$/.test(line));
+  return [`قائمة طلاب ${grade} — الشعبة ${section}`, ...roster].join("\n");
+}
+
+export function attendanceDateKey(grade, section, date) {
+  return `${grade}|${section}|${date}`;
+}
+
+export function summarizeAttendance(history, grade, section, studentId) {
+  let present = 0;
+  let absent = 0;
+  for (const [key, record] of Object.entries(history || {})) {
+    if (!key.startsWith(`${grade}|${section}|`)) continue;
+    const status = record?.[studentId]?.status || record?.[studentId];
+    if (status === "present") present++;
+    if (status === "absent") absent++;
+  }
+  return { present, absent, total: present + absent };
+}
+
 export function getDailyWidgetStatus(periodSettings, date = new Date()) {
   const day = date.getDay();
   const dayLabel = `${ARABIC_DAYS[day]} · ${date.getDate()}/${date.getMonth() + 1}`;

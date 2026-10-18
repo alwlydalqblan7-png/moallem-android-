@@ -6,16 +6,16 @@
     android:background="@drawable/moallem_widget_background"
     android:gravity="center_vertical"
     android:orientation="vertical"
-    android:padding="18dp">
+    android:padding="14dp">
 
-    <TextView
-        android:id="@+id/widget_title"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="دفتر المعلّم"
-        android:textColor="#173653"
-        android:textSize="21sp"
-        android:textStyle="bold" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <ImageView android:id="@+id/widget_icon" android:layout_width="30dp" android:layout_height="30dp" android:src="@mipmap/ic_launcher" android:contentDescription="أيقونة معلّم" />
+        <TextView android:id="@+id/widget_title" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:text="معلّم" android:textColor="#173653" android:textSize="19sp" android:textStyle="bold" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/widget_today"
@@ -51,4 +51,13 @@
         android:text="الأربعاء"
         android:textColor="#718292"
         android:textSize="16sp" />
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="horizontal">
+        <TextView android:id="@+id/widget_gradebook" style="@style/MoallemWidgetShortcut" android:text="العلامات" />
+        <TextView android:id="@+id/widget_attendance" style="@style/MoallemWidgetShortcut" android:text="الحضور" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:orientation="horizontal">
+        <TextView android:id="@+id/widget_preparation" style="@style/MoallemWidgetShortcut" android:text="التحضير" />
+        <TextView android:id="@+id/widget_board" style="@style/MoallemWidgetShortcut" android:text="السبورة" />
+    </LinearLayout>
 </LinearLayout>

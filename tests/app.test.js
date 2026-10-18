@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { autoColorHtml, mergeSubjectOptions } from "../src/preparation-format.js";
 import { decodePdfBackupEntries, validateMoallemBackup } from "../src/backup-format.js";
-import { getDailyWidgetStatus, parseStudentNames } from "../src/student-tools.js";
+import { attendanceDateKey, formatClassRoster, getDailyWidgetStatus, parseStudentNames, summarizeAttendance } from "../src/student-tools.js";
 
 test("subject migration adds new options without removing or renaming legacy subjects", () => {
   const old = ["العلوم العامة", "الفيزياء", "الكيمياء", "العربية"];
@@ -64,4 +64,24 @@ test("home widget status follows configured lesson times and school days", () =>
   assert.match(getDailyWidgetStatus(periods, new Date(2026, 9, 14, 11, 0)).status, /انتهت حصصك اليوم/);
   assert.equal(getDailyWidgetStatus(periods, new Date(2026, 9, 16, 9, 0)).state, "holiday");
   assert.equal(getDailyWidgetStatus([], new Date(2026, 9, 14, 7, 0)).state, "unconfigured");
+});
+
+test("class sharing exports only the selected section in its existing order", () => {
+  const students = [
+    { id: 4, name: "ليلى", grade: "الثامن", section: "أ" },
+    { id: 5, name: "عمر", grade: "الثامن", section: "ب" },
+    { id: 6, name: "سارة", grade: "الثامن", section: "أ" },
+  ];
+  assert.equal(formatClassRoster(students, "الثامن", "أ"), "قائمة طلاب الثامن — الشعبة أ\n1. ليلى\n2. سارة");
+});
+
+test("attendance history keys isolate dates and sections and summarize without duplicates", () => {
+  const history = {
+    [attendanceDateKey("الثامن", "أ", "2026-10-18")]: { 1: { status: "present" }, 2: { status: "absent" } },
+    [attendanceDateKey("الثامن", "أ", "2026-10-19")]: { 1: { status: "absent" } },
+    [attendanceDateKey("الثامن", "ب", "2026-10-19")]: { 1: { status: "present" } },
+  };
+  assert.deepEqual(summarizeAttendance(history, "الثامن", "أ", 1), { present: 1, absent: 1, total: 2 });
+  assert.deepEqual(summarizeAttendance(history, "الثامن", "أ", 2), { present: 0, absent: 1, total: 1 });
+  assert.notEqual(attendanceDateKey("الثامن", "أ", "2026-10-18"), attendanceDateKey("الثامن", "ب", "2026-10-18"));
 });
