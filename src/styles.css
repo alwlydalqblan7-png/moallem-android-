@@ -339,3 +339,37 @@ main{padding:11px}
 .prep-fullpage .rich-editor{display:block;box-sizing:border-box;width:100%;max-width:none;min-height:72vh;padding:clamp(16px,4vw,34px);background:#fff;color:#111;line-height:2;font-size:17px;white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #d9e1e7;border-radius:8px}
 .prep-fullpage .prep-color-tools{position:sticky;top:0;z-index:2;background:#fff;padding:10px 0;display:flex;flex-wrap:wrap;gap:7px}
 @media(max-width:620px){.prep-fullpage{padding:6px;border-radius:8px}.prep-fullpage .rich-editor{min-height:75vh;padding:16px;font-size:16px}}
+
+/* Section-scoped homework and memo tracker */
+.homework-panel{display:grid;gap:14px}
+.homework-form{padding:14px;border:1px solid #dce6ee;border-radius:14px;background:#f8fafc}
+.homework-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.homework-fields label{display:grid;gap:6px;color:var(--muted);font-size:13px;font-weight:700}
+.homework-fields input,.homework-fields select,.homework-fields textarea{box-sizing:border-box;width:100%;min-height:42px;padding:9px 11px;border:1px solid #dce5ec;border-radius:10px;background:#fff;color:var(--ink);font:inherit}
+.homework-fields textarea{min-height:86px;resize:vertical}
+.homework-title,.homework-details{grid-column:1/-1}
+.homework-list{display:grid;gap:12px}
+.homework-card{padding:14px;border:1px solid #dce6ee;border-radius:15px;background:#fff;box-shadow:0 3px 14px #102a4308}
+.homework-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.homework-card-head h3{margin:6px 0;color:var(--navy);font-size:18px}
+.homework-card-head p{margin:4px 0;color:var(--muted);font-size:13px}
+.homework-card-head small{display:block;margin-top:6px;white-space:pre-wrap;color:var(--ink);line-height:1.7}
+.homework-badge{display:inline-block;padding:4px 9px;border-radius:999px;font-size:11px;font-weight:800}
+.homework-badge.assignment{background:#eaf4ff;color:#1769aa}
+.homework-badge.memo{background:#edf8f0;color:#16834a}
+.homework-badge.exam{background:#fff0f0;color:#c62828}
+.homework-totals{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.homework-totals span{padding:6px 10px;border-radius:9px;font-size:12px;font-weight:700}
+.homework-totals .pending{background:#fff6dd;color:#8c6500}
+.homework-totals .submitted{background:#eaf7ee;color:#16834a}
+.homework-totals .absent{background:#fff0f0;color:#c62828}
+.homework-roster{display:grid;gap:7px}
+.homework-student{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #edf1f4}
+.homework-student>strong{min-width:100px;font-size:14px}
+.homework-status-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px}
+.homework-status-actions button{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:34px;padding:6px 9px;border:1px solid #dce5ec;border-radius:9px;background:#fff;color:var(--ink);font:inherit;font-size:12px}
+.homework-status-actions button.active.pending{border-color:#e0b844;background:#fff6dd;color:#805d00}
+.homework-status-actions button.active.submitted{border-color:#42a66c;background:#eaf7ee;color:#137a3d}
+.homework-status-actions button.active.absent{border-color:#dc6464;background:#fff0f0;color:#bd2626}
+.homework-status-actions button.parent-share{color:#1769aa}
+@media(max-width:620px){.homework-fields{grid-template-columns:1fr}.homework-title,.homework-details{grid-column:auto}.homework-card-head{flex-direction:column}.homework-card-head>.actions{width:100%}.homework-card-head>.actions button{flex:1}.homework-student{align-items:flex-start;flex-direction:column}.homework-status-actions{justify-content:flex-start}.homework-status-actions button{flex:1}}
