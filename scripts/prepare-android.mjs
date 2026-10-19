@@ -64,6 +64,14 @@ let appBuild = readFileSync(appBuildPath, "utf8");
 if (!appBuild.includes('applicationIdSuffix ".test"')) {
   appBuild = appBuild.replace("buildTypes {", 'buildTypes {\n        debug {\n            // Install test builds beside production without touching its app data.\n            applicationIdSuffix ".test"\n        }');
 }
+// Give the side-by-side test build a launcher label that cannot be confused
+// with the production app, which keeps the same visual interface and icon.
+if (!appBuild.includes('resValue "string", "app_name", "معلّم تجريبي 2026-2027"')) {
+  appBuild = appBuild.replace(
+    'applicationIdSuffix ".test"',
+    'applicationIdSuffix ".test"\n            resValue "string", "app_name", "معلّم تجريبي 2026-2027"\n            resValue "string", "title_activity_main", "معلّم تجريبي 2026-2027"',
+  );
+}
 const versionCode = Number(process.env.MOALLEM_VERSION_CODE || 1);
 if (!Number.isSafeInteger(versionCode) || versionCode < 1) throw new Error("MOALLEM_VERSION_CODE must be a positive integer");
 const versionName = process.env.MOALLEM_VERSION_NAME || `2.7.${versionCode}`;
