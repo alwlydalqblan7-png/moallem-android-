@@ -50,6 +50,7 @@ import { inspectDaftarBackup } from "./legacy-backup-inspector.js";
 import { attendanceDateKey, formatClassRoster, getDailyWidgetStatus, parseStudentNames, summarizeAttendance } from "./student-tools.js";
 import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
 import { calculateSciencePairSummary, calculateSubjectResult } from "./science-summary.js";
+import { buildStudentHomeworkMessage, filterHomeworkForClass, getHomeworkStatus, setHomeworkStatus, summarizeHomework } from "./homework.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const HomeWidget = registerPlugin("HomeWidget");
 const BackupFile = registerPlugin("BackupFile");
@@ -521,6 +522,10 @@ function App() {
     load("m2_saved_preparations", []),
   );
   const [knowledgeBank, setKnowledgeBank] = useState(() => load("m2_knowledge_bank", []));
+  const [homeworkItems, setHomeworkItems] = useState(() => load("m2_homework", []));
+  const [homeworkFormOpen, setHomeworkFormOpen] = useState(false);
+  const [editingHomeworkId, setEditingHomeworkId] = useState(null);
+  const [homeworkDraft, setHomeworkDraft] = useState({ type: "واجب", title: "", subject: "", dueDate: "", details: "" });
   const [knowledgeQuery, setKnowledgeQuery] = useState("");
   const [knowledgeTypeFilter, setKnowledgeTypeFilter] = useState("الكل");
   const [knowledgeFormOpen, setKnowledgeFormOpen] = useState(false);
@@ -620,6 +625,7 @@ function App() {
     [savedPreparations],
   );
   useEffect(() => persist("m2_knowledge_bank", knowledgeBank), [knowledgeBank]);
+  useEffect(() => persist("m2_homework", homeworkItems), [homeworkItems]);
   useEffect(() => {
     if (!plannerBook) return;
     // الكتاب مصدر مستقل؛ المادة/الفرع يحددان طريقة التحضير فقط.
@@ -1286,6 +1292,56 @@ ${sourceExcerpt}
     setEditingPreparationId(item.id);
     setTab("ai");
   };
+  const classHomework = useMemo(() => filterHomeworkForClass(homeworkItems, grade, section), [homeworkItems, grade, section]);
+  const resetHomeworkDraft = () => {
+    setHomeworkDraft({ type: "واجب", title: "", subject, dueDate: "", details: "" });
+    setEditingHomeworkId(null);
+    setHomeworkFormOpen(true);
+  };
+  const editHomeworkItem = (item) => {
+    setHomeworkDraft({ type: item.type || "واجب", title: item.title || "", subject: item.subject || subject, dueDate: item.dueDate || "", details: item.details || "" });
+    setEditingHomeworkId(item.id);
+    setHomeworkFormOpen(true);
+  };
+  const saveHomeworkItem = () => {
+    const title = homeworkDraft.title.trim();
+    if (!title || !homeworkDraft.subject) {
+      alert("أدخل عنوان الواجب واختر المادة قبل الحفظ.");
+      return;
+    }
+    const now = new Date().toISOString();
+    if (editingHomeworkId != null) {
+      setHomeworkItems((items) => items.map((item) => item.id === editingHomeworkId
+        ? { ...item, ...homeworkDraft, title, grade: item.grade, section: item.section, updatedAt: now }
+        : item));
+    } else {
+      setHomeworkItems((items) => [{
+        id: `homework-${Date.now()}`, ...homeworkDraft, title, grade, section, statuses: {}, createdAt: now, updatedAt: now,
+      }, ...items]);
+    }
+    setHomeworkFormOpen(false);
+    setEditingHomeworkId(null);
+    setHomeworkDraft({ type: "واجب", title: "", subject, dueDate: "", details: "" });
+  };
+  const deleteHomeworkItem = (id) => {
+    if (confirm("حذف هذا الواجب أو التذكرة؟")) setHomeworkItems((items) => items.filter((item) => item.id !== id));
+  };
+  const markHomeworkStatus = (itemId, studentId, status) => {
+    setHomeworkItems((items) => setHomeworkStatus(items, itemId, studentId, status));
+  };
+  const shareHomeworkWithParent = (student) => shareText(
+    buildStudentHomeworkMessage({ grade, section, student, items: classHomework }),
+    "متابعة الواجبات",
+  );
+  const shareClassHomework = () => {
+    if (!classHomework.length) return;
+    const lines = classHomework.map((item) => {
+      const counts = summarizeHomework(item, classStudents);
+      return `• ${item.type}: ${item.title} — ${item.subject}${item.dueDate ? ` — الموعد ${item.dueDate}` : ""}
+لم يسلّم: ${counts.pending} | سلّم: ${counts.submitted} | غائب: ${counts.absent}`;
+    });
+    shareText(`متابعة واجبات الصف ${grade} — الشعبة ${section}\n${lines.join("\n")}\n\nهذه رسالة للمشاركة فقط؛ لا تُرسل تلقائيًا.`, "ملخص واجبات الشعبة");
+  };
   const resetKnowledgeDraft = () => {
     setKnowledgeDraft({title:"",type:"سؤال",subject,grade,section,content:""});
     setEditingKnowledgeId(null);
@@ -1662,6 +1718,13 @@ ${sourceExcerpt}
                     text={`${knowledgeBank.length} سؤال ومذكرة وامتحان`}
                     onClick={() => setTab("knowledge")}
                   />
+                  <Tile
+                    tone="green"
+                    icon={<ClipboardList />}
+                    title="الواجبات والمذكرات"
+                    text={`${classHomework.length} بند في هذه الشعبة`}
+                    onClick={() => setTab("homework")}
+                  />
                 </div>
                 <section className="home-widget-card" dir="rtl">
                   <div className="home-widget-top">
@@ -1695,6 +1758,55 @@ ${sourceExcerpt}
                   <button onClick={() => setTab("ai")}>فتح المساعد</button>
                 </section>
               </div>
+            )}
+            {tab === "homework" && (
+              <section className="panel homework-panel" dir="rtl">
+                <div className="panelhead">
+                  <div>
+                    <span className="eyebrow">متابعة الصف والشعبة</span>
+                    <h2>الواجبات والمذكرات</h2>
+                    <p>{grade} — الشعبة {section} · تُحفظ البيانات محليًا على الجهاز وتدخل ضمن النسخ الاحتياطية.</p>
+                  </div>
+                  <div className="actions">
+                    {classHomework.length > 0 && <button type="button" onClick={shareClassHomework}><Share2 size={16}/> مشاركة ملخص الشعبة</button>}
+                    {!homeworkFormOpen && <button className="primary" type="button" onClick={resetHomeworkDraft}><Plus size={16}/> إضافة واجب أو مذكرة</button>}
+                  </div>
+                </div>
+                {homeworkFormOpen && <div className="homework-form">
+                  <div className="homework-fields">
+                    <label>النوع<select value={homeworkDraft.type} onChange={e=>setHomeworkDraft(d=>({...d,type:e.target.value}))}>{["واجب","مذكرة","امتحان"].map(type=><option key={type}>{type}</option>)}</select></label>
+                    <label>المادة<select value={homeworkDraft.subject} onChange={e=>setHomeworkDraft(d=>({...d,subject:e.target.value}))}>{subjects.map(value=><option key={value}>{value}</option>)}</select></label>
+                    <label className="homework-title">العنوان<input value={homeworkDraft.title} onChange={e=>setHomeworkDraft(d=>({...d,title:e.target.value}))} placeholder="مثال: حل أسئلة الدرس"/></label>
+                    <label>موعد التسليم<input type="date" value={homeworkDraft.dueDate} onChange={e=>setHomeworkDraft(d=>({...d,dueDate:e.target.value}))}/></label>
+                    <label className="homework-details">ملاحظات<textarea value={homeworkDraft.details} onChange={e=>setHomeworkDraft(d=>({...d,details:e.target.value}))} placeholder="تفاصيل إضافية للأهل أو للطلاب"/></label>
+                  </div>
+                  <div className="actions"><button className="primary" type="button" onClick={saveHomeworkItem}><Save size={16}/> حفظ</button><button type="button" onClick={()=>{setHomeworkFormOpen(false);setEditingHomeworkId(null);}}>إلغاء</button></div>
+                </div>}
+                {classHomework.length === 0 ? <div className="empty-state">لا توجد واجبات أو مذكرات لهذه الشعبة بعد. أضف بندًا ليبدأ تتبّع التسليم.</div> : <div className="homework-list">
+                  {classHomework.map(item => {
+                    const counts = summarizeHomework(item, classStudents);
+                    return <article className="homework-card" key={item.id}>
+                      <div className="homework-card-head">
+                        <div><span className={`homework-badge ${item.type === "امتحان" ? "exam" : item.type === "مذكرة" ? "memo" : "assignment"}`}>{item.type || "واجب"}</span><h3>{item.title}</h3><p>{item.subject} · {grade} · الشعبة {section}{item.dueDate ? ` · التسليم ${item.dueDate}` : ""}</p>{item.details && <small>{item.details}</small>}</div>
+                        <div className="actions"><button type="button" onClick={()=>editHomeworkItem(item)}><Edit3 size={15}/> تعديل</button><button type="button" className="danger" aria-label="حذف" onClick={()=>deleteHomeworkItem(item.id)}><Trash2 size={15}/></button></div>
+                      </div>
+                      <div className="homework-totals"><span className="pending">لم يسلّم: {counts.pending}</span><span className="submitted">سلّم: {counts.submitted}</span><span className="absent">غائب: {counts.absent}</span></div>
+                      <div className="homework-roster">{classStudents.map(student => {
+                        const status = getHomeworkStatus(item, student.id);
+                        return <div className="homework-student" key={student.id}>
+                          <strong>{student.name}</strong>
+                          <div className="homework-status-actions">
+                            <button type="button" className={status === "pending" ? "active pending" : ""} aria-pressed={status === "pending"} onClick={()=>markHomeworkStatus(item.id,student.id,"pending")}>لم يسلّم</button>
+                            <button type="button" className={status === "submitted" ? "active submitted" : ""} aria-pressed={status === "submitted"} onClick={()=>markHomeworkStatus(item.id,student.id,"submitted")}>سلّم</button>
+                            <button type="button" className={status === "absent" ? "active absent" : ""} aria-pressed={status === "absent"} onClick={()=>markHomeworkStatus(item.id,student.id,"absent")}>غائب</button>
+                            <button type="button" className="parent-share" onClick={()=>shareHomeworkWithParent(student)}><Share2 size={14}/> رسالة للأهل</button>
+                          </div>
+                        </div>;
+                      })}</div>
+                    </article>;
+                  })}
+                </div>}
+              </section>
             )}
             {tab === "knowledge" && (
               <section className="panel knowledge-panel" dir="rtl">
