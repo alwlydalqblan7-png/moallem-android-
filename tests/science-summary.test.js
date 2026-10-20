@@ -5,8 +5,8 @@ import { calculateSciencePairSummary, calculateSubjectResult } from "../src/scie
 function makeBook(work, exam) {
   return {
     columns: [
-      { id: "oral", name: "شفهي", type: "شفهي", max: 10 },
-      { id: "homework", name: "وظائف", type: "وظائف", max: 10 },
+      { id: "oral", name: "شفهي", type: "شفهي", max: 100 },
+      { id: "homework", name: "وظائف", type: "وظائف", max: 100 },
       { id: "official_final_exam", name: "الامتحان الأخير", type: "امتحان نهائي", max: 100 },
     ],
     marks: { "student-1": { oral: work / 2, homework: work / 2, official_final_exam: exam } },
