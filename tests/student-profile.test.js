@@ -33,6 +33,7 @@ test("student profile joins only the student's class grades, attendance and home
   assert.deepEqual(profile.attendanceSummary, { present: 0, absent: 1, late: 0 });
   assert.equal(profile.homework.length, 1);
   assert.equal(profile.homework[0].status, "submitted");
+  assert.equal(profile.legacyStatus, "present");
 });
 
 test("student profile notes are isolated by student id and ordered newest first", () => {
