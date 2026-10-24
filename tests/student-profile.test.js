@@ -59,7 +59,7 @@ test("printable profile is Arabic RTL and escapes user supplied text", () => {
   }, { school: "مدرسة" });
   assert.match(html, /lang="ar" dir="rtl"/);
   assert.match(html, /&lt;script&gt;/);
-  assert.match(html, /&lt;img src=x onerror=alert(1)&gt;/);
+  assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"));
   assert.doesNotMatch(html, /<script>alert/);
   assert.doesNotMatch(html, /<img src=x/);
 });
