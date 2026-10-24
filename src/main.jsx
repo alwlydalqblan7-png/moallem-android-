@@ -646,7 +646,7 @@ function App() {
   );
   const profileStudent = students.find((student) => String(student.id) === String(profileStudentId)) || null;
   const studentProfile = useMemo(() => profileStudent ? collectStudentProfile({
-    student: profileStudent, gradebooks, attendanceHistory, homeworkItems, notes: studentNotes, officialGradeMaximum,
+    student: profileStudent, gradebooks, attendanceHistory, homeworkItems, notes: studentNotes, officialGradeMaximum, legacyAttendance: attendance,
   }) : null, [profileStudent, gradebooks, attendanceHistory, homeworkItems, studentNotes]);
   const bulkNameList = useMemo(() => parseStudentNames(bulkNamesText), [bulkNamesText]);
   const bulkDuplicateCount = useMemo(() => {
@@ -1919,6 +1919,7 @@ ${sourceExcerpt}
                   <article><small>التأخر</small><strong>{studentProfile.attendanceSummary.late}</strong><span>يوم</span></article>
                   <article><small>بنود غير مسلّمة</small><strong className="pending-text">{studentProfile.homework.filter(item => item.status !== "submitted").length}</strong><span>بند</span></article>
                 </div>
+                {studentProfile.legacyStatus && <p className="note">حالة حضور قديمة محفوظة بلا تاريخ: {studentProfile.legacyStatus === "absent" ? "غائب" : studentProfile.legacyStatus === "late" ? "متأخر" : "حاضر"}</p>}
                 <section className="profile-block">
                   <h3>العلامات والمحصلات</h3>
                   {studentProfile.grades.length ? <div className="profile-table-scroll"><table className="student-profile-table"><thead><tr><th>المادة</th><th>المحصلة</th><th>الدرجة العظمى</th><th>الحالة</th></tr></thead><tbody>{studentProfile.grades.map(item=><tr key={item.subject}><td>{item.subject}</td><td>{item.value}</td><td>{item.maximum || "—"}</td><td>{item.pendingExam ? "بانتظار الامتحان" : "—"}</td></tr>)}</tbody></table></div> : <p className="empty-state">لا توجد علامات محفوظة لهذا الطالب بعد.</p>}
