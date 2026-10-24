@@ -8,6 +8,7 @@ export function collectStudentProfile({
   homeworkItems = [],
   notes = [],
   officialGradeMaximum = () => null,
+  legacyAttendance = {},
 }) {
   if (!student) return null;
   const classPrefix = `${student.grade}|${student.section}|`;
@@ -47,7 +48,8 @@ export function collectStudentProfile({
     if (record.status === "late") summary.late += 1;
     return summary;
   }, { present: 0, absent: 0, late: 0 });
-  return { student, grades, attendance, attendanceSummary, homework, notes: studentNotes };
+  const legacyStatus = legacyAttendance?.[`${student.grade}|${student.section}|${student.id}`] || "";
+  return { student, grades, attendance, attendanceSummary, homework, notes: studentNotes, legacyStatus };
 }
 
 const escapeHtml = (value) => String(value ?? "")
@@ -59,7 +61,7 @@ const escapeHtml = (value) => String(value ?? "")
 
 export function buildStudentProfileHtml(profile, school = {}) {
   if (!profile?.student) throw new Error("ملف الطالب غير متوفر");
-  const { student, grades = [], attendance = [], attendanceSummary = {}, homework = [], notes = [] } = profile;
+  const { student, grades = [], attendance = [], attendanceSummary = {}, homework = [], notes = [], legacyStatus = "" } = profile;
   const gradeRows = grades.length
     ? grades.map((item) => `<tr><td>${escapeHtml(item.subject)}</td><td>${escapeHtml(item.value)}</td><td>${escapeHtml(item.maximum || "—")}</td><td>${item.pendingExam ? "بانتظار الامتحان" : "—"}</td></tr>`).join("")
     : '<tr><td colspan="4">لا توجد علامات محفوظة</td></tr>';
@@ -76,7 +78,7 @@ export function buildStudentProfileHtml(profile, school = {}) {
     @page{size:A4;margin:14mm}body{font-family:Arial,sans-serif;color:#182533;line-height:1.6}h1{text-align:center;color:#173653;margin:0 0 5px}h2{font-size:16px;color:#173653;border-bottom:1px solid #cfdbe4;padding-bottom:4px;margin:17px 0 7px}.school{text-align:center;color:#526577}.identity{background:#f2f7fb;border:1px solid #dbe6ee;border-radius:9px;padding:10px;margin:12px 0}.summary{color:#37566e}table{width:100%;border-collapse:collapse;font-size:12px;page-break-inside:avoid}th,td{border:1px solid #cfd8df;text-align:right;padding:6px}th{background:#eaf1f6}ul{padding-right:22px}li{margin:5px 0}.footer{margin-top:20px;color:#526577;font-size:11px}
     </style></head><body><h1>ملف متابعة الطالب</h1><div class="school">${escapeHtml(school.school || "المدرسة")}${school.teacher ? ` · المعلم: ${escapeHtml(school.teacher)}` : ""}</div>
     <div class="identity"><strong>${escapeHtml(student.name)}</strong> · الصف ${escapeHtml(student.grade)} · الشعبة ${escapeHtml(student.section)}</div>
-    <p class="summary">الحضور: ${attendanceSummary.present || 0} يوم · الغياب: ${attendanceSummary.absent || 0} يوم · التأخر: ${attendanceSummary.late || 0} يوم</p>
+    <p class="summary">الحضور: ${attendanceSummary.present || 0} يوم · الغياب: ${attendanceSummary.absent || 0} يوم · التأخر: ${attendanceSummary.late || 0} يوم</p>${legacyStatus ? `<p>حالة محفوظة قديمة بلا تاريخ: ${legacyStatus === "absent" ? "غائب" : legacyStatus === "late" ? "متأخر" : "حاضر"}</p>` : ""}
     <h2>العلامات والمحصلات</h2><table><thead><tr><th>المادة</th><th>المحصلة</th><th>الدرجة العظمى</th><th>الحالة</th></tr></thead><tbody>${gradeRows}</tbody></table>
     <h2>الحضور والغياب</h2><table><thead><tr><th>التاريخ</th><th>الحالة</th><th>ملاحظة</th></tr></thead><tbody>${attendanceRows}</tbody></table>
     <h2>الواجبات والمذكرات</h2><table><thead><tr><th>النوع</th><th>العنوان</th><th>المادة</th><th>التسليم</th><th>الموعد</th></tr></thead><tbody>${homeworkRows}</tbody></table>
