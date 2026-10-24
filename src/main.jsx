@@ -51,6 +51,7 @@ import { attendanceDateKey, formatClassRoster, getDailyWidgetStatus, parseStuden
 import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
 import { calculateSciencePairSummary, calculateSubjectResult } from "./science-summary.js";
 import { buildStudentHomeworkMessage, filterHomeworkForClass, getHomeworkStatus, setHomeworkStatus, summarizeHomework } from "./homework.js";
+import { buildStudentProfileHtml, collectStudentProfile } from "./student-profile.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const HomeWidget = registerPlugin("HomeWidget");
 const BackupFile = registerPlugin("BackupFile");
@@ -526,6 +527,9 @@ function App() {
   const [homeworkFormOpen, setHomeworkFormOpen] = useState(false);
   const [editingHomeworkId, setEditingHomeworkId] = useState(null);
   const [homeworkDraft, setHomeworkDraft] = useState({ type: "واجب", title: "", subject: "", dueDate: "", details: "" });
+  const [studentNotes, setStudentNotes] = useState(() => load("m2_student_notes", []));
+  const [profileStudentId, setProfileStudentId] = useState(null);
+  const [studentNoteDraft, setStudentNoteDraft] = useState("");
   const [knowledgeQuery, setKnowledgeQuery] = useState("");
   const [knowledgeTypeFilter, setKnowledgeTypeFilter] = useState("الكل");
   const [knowledgeFormOpen, setKnowledgeFormOpen] = useState(false);
@@ -626,6 +630,7 @@ function App() {
   );
   useEffect(() => persist("m2_knowledge_bank", knowledgeBank), [knowledgeBank]);
   useEffect(() => persist("m2_homework", homeworkItems), [homeworkItems]);
+  useEffect(() => persist("m2_student_notes", studentNotes), [studentNotes]);
   useEffect(() => {
     if (!plannerBook) return;
     // الكتاب مصدر مستقل؛ المادة/الفرع يحددان طريقة التحضير فقط.
@@ -639,6 +644,10 @@ function App() {
     () => students.filter((s) => s.grade === grade && s.section === section),
     [students, grade, section],
   );
+  const profileStudent = students.find((student) => String(student.id) === String(profileStudentId)) || null;
+  const studentProfile = useMemo(() => profileStudent ? collectStudentProfile({
+    student: profileStudent, gradebooks, attendanceHistory, homeworkItems, notes: studentNotes, officialGradeMaximum,
+  }) : null, [profileStudent, gradebooks, attendanceHistory, homeworkItems, studentNotes]);
   const bulkNameList = useMemo(() => parseStudentNames(bulkNamesText), [bulkNamesText]);
   const bulkDuplicateCount = useMemo(() => {
     const seen = new Set(classStudents.map((student) => student.name.replace(/\s+/g, " ").trim().toLocaleLowerCase("ar")));
@@ -1293,6 +1302,30 @@ ${sourceExcerpt}
     setTab("ai");
   };
   const classHomework = useMemo(() => filterHomeworkForClass(homeworkItems, grade, section), [homeworkItems, grade, section]);
+  const openStudentProfile = (student) => {
+    setProfileStudentId(student.id);
+    setStudentNoteDraft("");
+    setTab("student-profile");
+  };
+  const saveStudentNote = () => {
+    const text = studentNoteDraft.trim();
+    if (!profileStudent || !text) return;
+    setStudentNotes((items) => [{ id: `student-note-${Date.now()}`, studentId: profileStudent.id, text, createdAt: new Date().toISOString() }, ...items]);
+    setStudentNoteDraft("");
+  };
+  const deleteStudentNote = (noteId) => {
+    if (confirm("حذف هذه الملاحظة فقط؟")) setStudentNotes((items) => items.filter((note) => note.id !== noteId));
+  };
+  const printStudentProfile = () => {
+    if (!studentProfile) return;
+    printDocument(`ملف متابعة ${profileStudent.name}`, buildStudentProfileHtml(studentProfile, schoolSettings));
+  };
+  const shareStudentProfileHomework = () => {
+    if (!studentProfile) return;
+    shareText(buildStudentHomeworkMessage({
+      grade: profileStudent.grade, section: profileStudent.section, student: profileStudent, items: studentProfile.homework,
+    }), `متابعة ${profileStudent.name}`);
+  };
   const resetHomeworkDraft = () => {
     setHomeworkDraft({ type: "واجب", title: "", subject, dueDate: "", details: "" });
     setEditingHomeworkId(null);
@@ -1866,6 +1899,46 @@ ${sourceExcerpt}
                 <div className="official-schedule-footer"><span>ملاحظات: ................................</span><span>اسم المدرس وتوقيعه: ................................</span></div>
               </section>
             )}
+            {tab === "student-profile" && profileStudent && studentProfile && (
+              <section className="panel student-profile-panel" dir="rtl">
+                <div className="panelhead">
+                  <div>
+                    <span className="eyebrow">متابعة الطالب</span>
+                    <h2>{profileStudent.name}</h2>
+                    <p>{profileStudent.grade} — الشعبة {profileStudent.section}</p>
+                  </div>
+                  <div className="actions">
+                    <button type="button" onClick={() => setTab("students")}><ChevronRight size={16}/> العودة للشعبة</button>
+                    {studentProfile.homework.some(item => item.status !== "submitted") && <button type="button" onClick={shareStudentProfileHomework}><Share2 size={16}/> رسالة لولي الأمر</button>}
+                    <button type="button" className="primary" onClick={printStudentProfile}><PrinterIcon size={16}/> طباعة / PDF</button>
+                  </div>
+                </div>
+                <div className="student-profile-summary">
+                  <article><small>الحضور</small><strong>{studentProfile.attendanceSummary.present}</strong><span>يوم</span></article>
+                  <article><small>الغياب</small><strong className="absent-text">{studentProfile.attendanceSummary.absent}</strong><span>يوم</span></article>
+                  <article><small>التأخر</small><strong>{studentProfile.attendanceSummary.late}</strong><span>يوم</span></article>
+                  <article><small>بنود غير مسلّمة</small><strong className="pending-text">{studentProfile.homework.filter(item => item.status !== "submitted").length}</strong><span>بند</span></article>
+                </div>
+                <section className="profile-block">
+                  <h3>العلامات والمحصلات</h3>
+                  {studentProfile.grades.length ? <div className="profile-table-scroll"><table className="student-profile-table"><thead><tr><th>المادة</th><th>المحصلة</th><th>الدرجة العظمى</th><th>الحالة</th></tr></thead><tbody>{studentProfile.grades.map(item=><tr key={item.subject}><td>{item.subject}</td><td>{item.value}</td><td>{item.maximum || "—"}</td><td>{item.pendingExam ? "بانتظار الامتحان" : "—"}</td></tr>)}</tbody></table></div> : <p className="empty-state">لا توجد علامات محفوظة لهذا الطالب بعد.</p>}
+                </section>
+                <section className="profile-block">
+                  <h3>سجل الحضور والغياب</h3>
+                  {studentProfile.attendance.length ? <div className="profile-table-scroll"><table className="student-profile-table"><thead><tr><th>التاريخ</th><th>الحالة</th><th>ملاحظة</th></tr></thead><tbody>{studentProfile.attendance.map(item=><tr key={item.date}><td>{item.date}</td><td><span className={`profile-attendance-status ${item.status}`}>{item.status === "present" ? "م · حاضر" : item.status === "absent" ? "غا · غائب" : "متأخر"}</span></td><td>{item.note || "—"}</td></tr>)}</tbody></table></div> : <p className="empty-state">لا توجد أيام حضور مؤرخة لهذا الطالب.</p>}
+                </section>
+                <section className="profile-block">
+                  <h3>الواجبات والمذكرات</h3>
+                  {studentProfile.homework.length ? <div className="profile-table-scroll"><table className="student-profile-table"><thead><tr><th>النوع</th><th>العنوان</th><th>المادة</th><th>التسليم</th><th>الموعد</th></tr></thead><tbody>{studentProfile.homework.map(item=><tr key={item.id}><td>{item.type || "واجب"}</td><td>{item.title}</td><td>{item.subject || "—"}</td><td><span className={`profile-homework-status ${item.status}`}>{item.status === "submitted" ? "مُسلّم" : item.status === "absent" ? "غائب ويحتاج استدراك" : "لم يسلّم"}</span></td><td>{item.dueDate || "—"}</td></tr>)}</tbody></table></div> : <p className="empty-state">لا توجد واجبات أو مذكرات مسجلة.</p>}
+                </section>
+                <section className="profile-block">
+                  <h3>ملاحظات المعلم</h3>
+                  <div className="student-note-form"><textarea value={studentNoteDraft} onChange={event=>setStudentNoteDraft(event.target.value)} placeholder="اكتب ملاحظة متابعة لهذا الطالب..." rows={3}/><button type="button" className="primary" onClick={saveStudentNote} disabled={!studentNoteDraft.trim()}><Save size={16}/> حفظ الملاحظة</button></div>
+                  {studentProfile.notes.length ? <div className="student-note-list">{studentProfile.notes.map(note=><article key={note.id}><div><small>{String(note.createdAt || "").slice(0,10)}</small><p>{note.text}</p></div><button type="button" className="danger" title="حذف الملاحظة" onClick={()=>deleteStudentNote(note.id)}><Trash2 size={15}/></button></article>)}</div> : <p className="empty-state">لا توجد ملاحظات مسجلة.</p>}
+                </section>
+              </section>
+            )}
+            {tab === "student-profile" && !profileStudent && <section className="panel"><div className="empty-state">تعذر العثور على هذا الطالب. <button type="button" onClick={()=>setTab("students")}>العودة إلى الطلاب</button></div></section>}
             {tab === "students" && (
               <section className="panel">
                 <div className="panelhead">
@@ -1970,6 +2043,12 @@ ${sourceExcerpt}
                           <option key={g}>{g}</option>
                         ))}
                       </select>
+                      <button
+                        type="button"
+                        className="student-profile-button"
+                        title={`ملف متابعة ${s.name}`}
+                        onClick={() => openStudentProfile(s)}
+                      ><FileText size={16} /><span>ملف</span></button>
                       <button
                         type="button"
                         title={`مشاركة ${s.name}`}
