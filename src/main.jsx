@@ -647,7 +647,7 @@ function App() {
   const profileStudent = students.find((student) => String(student.id) === String(profileStudentId)) || null;
   const studentProfile = useMemo(() => profileStudent ? collectStudentProfile({
     student: profileStudent, gradebooks, attendanceHistory, homeworkItems, notes: studentNotes, officialGradeMaximum, legacyAttendance: attendance,
-  }) : null, [profileStudent, gradebooks, attendanceHistory, homeworkItems, studentNotes]);
+  }) : null, [profileStudent, gradebooks, attendanceHistory, homeworkItems, studentNotes, attendance]);
   const bulkNameList = useMemo(() => parseStudentNames(bulkNamesText), [bulkNamesText]);
   const bulkDuplicateCount = useMemo(() => {
     const seen = new Set(classStudents.map((student) => student.name.replace(/\s+/g, " ").trim().toLocaleLowerCase("ar")));
