@@ -21,6 +21,7 @@ test("student profile joins only the student's class grades, attendance and home
       "الثامن|أ|2026-10-20": { "7": { status: "absent", note: "غائب" } },
       "الثامن|ب|2026-10-21": { "7": { status: "present" } },
     },
+    legacyAttendance: { "الثامن|أ|7": "present" },
     homeworkItems: [
       { id: "a", grade: "الثامن", section: "أ", title: "الكسور", subject: "رياضيات", statuses: { "7": "submitted" } },
       { id: "b", grade: "الثامن", section: "ب", title: "المعادلات", subject: "رياضيات" },
