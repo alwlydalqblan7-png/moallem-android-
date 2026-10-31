@@ -30,7 +30,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npx vite build --base=./
-      - run: npx electron-builder --win nsis portable
+      - run: npx electron-builder --win nsis --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: Moallem-Windows-Desktop

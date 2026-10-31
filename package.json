@@ -14,8 +14,8 @@
     "test:app": "node --test tests/app.test.js",
     "test:worker": "node --test tests/worker.test.js",
     "desktop:start": "electron desktop/main.cjs",
-    "desktop:dir": "vite build --base=./ && electron-builder --dir --win",
-    "desktop:win": "vite build --base=./ && electron-builder --win nsis portable"
+    "desktop:dir": "vite build --base=./ && electron-builder --dir --win --publish never",
+    "desktop:win": "vite build --base=./ && electron-builder --win nsis --publish never"
   },
   "main": "desktop/main.cjs",
   "build": {
@@ -27,7 +27,7 @@
     "artifactName": "Moallem-Desktop-${version}-${arch}.${ext}",
     "win": {
       "icon": "assets/moallem-icon.ico",
-      "target": ["nsis", "portable"]
+      "target": ["nsis"]
     },
     "nsis": {
       "oneClick": false,
