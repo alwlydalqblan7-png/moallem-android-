@@ -1,0 +1,141 @@
+package __APP_PACKAGE__;
+
+import android.app.PendingIntent;
+import android.appwidget.AppWidgetManager;
+import android.appwidget.AppWidgetProvider;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.net.Uri;
+import android.os.Build;
+import android.text.format.DateFormat;
+import android.view.View;
+import android.widget.RemoteViews;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.util.Calendar;
+
+public class HomeWidgetProvider extends AppWidgetProvider {
+    private static final String[] DAYS = {"الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس"};
+    private static final String ACTION_PREVIOUS = "__APP_PACKAGE__.WIDGET_PREVIOUS_DAY";
+    private static final String ACTION_NEXT = "__APP_PACKAGE__.WIDGET_NEXT_DAY";
+
+    @Override
+    public void onUpdate(Context context, AppWidgetManager manager, int[] ids) {
+        for (int id : ids) updateOne(context, manager, id);
+    }
+
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        super.onReceive(context, intent);
+        if (ACTION_PREVIOUS.equals(intent.getAction()) || ACTION_NEXT.equals(intent.getAction())) {
+            SharedPreferences prefs = context.getSharedPreferences("moallem_widget", Context.MODE_PRIVATE);
+            int index = prefs.getInt("selected_day", currentSchoolDay());
+            index = ACTION_NEXT.equals(intent.getAction())
+                ? (index + 1) % DAYS.length
+                : (index + DAYS.length - 1) % DAYS.length;
+            prefs.edit().putInt("selected_day", index).apply();
+            updateAll(context);
+        }
+    }
+
+    public static void updateAll(Context context) {
+        AppWidgetManager manager = AppWidgetManager.getInstance(context);
+        int[] ids = manager.getAppWidgetIds(new ComponentName(context, HomeWidgetProvider.class));
+        for (int id : ids) updateOne(context, manager, id);
+    }
+
+    private static void updateOne(Context context, AppWidgetManager manager, int id) {
+        SharedPreferences prefs = context.getSharedPreferences("moallem_widget", Context.MODE_PRIVATE);
+        int dayIndex = prefs.getInt("selected_day", currentSchoolDay());
+        dayIndex = Math.floorMod(dayIndex, DAYS.length);
+        String day = DAYS[dayIndex];
+        JSONObject schedule;
+        try {
+            schedule = new JSONObject(prefs.getString("weekly_schedule", "{}"));
+        } catch (Exception error) {
+            schedule = new JSONObject();
+        }
+        JSONArray periods = schedule.optJSONArray(day);
+        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.moallem_widget);
+        views.setImageViewResource(R.id.widget_icon, R.mipmap.ic_launcher);
+        String dayLabel = day + (dayIndex == currentSchoolDay() ? "  ✓ اليوم" : "") + " · " + DateFormat.format("d/M", Calendar.getInstance());
+        views.setTextViewText(R.id.widget_day, dayLabel);
+        views.setOnClickPendingIntent(R.id.widget_root, routeIntent(context, "schedule", 470));
+        views.setOnClickPendingIntent(R.id.widget_previous, dayAction(context, ACTION_PREVIOUS, 471));
+        views.setOnClickPendingIntent(R.id.widget_next, dayAction(context, ACTION_NEXT, 472));
+
+        boolean any = false;
+        for (int i = 0; i < 7; i++) {
+            int viewId = rowId(i);
+            JSONObject period = periods == null ? null : periods.optJSONObject(i);
+            String text = periodText(period);
+            if (!text.isEmpty()) {
+                any = true;
+                views.setViewVisibility(viewId, View.VISIBLE);
+                views.setTextViewText(viewId, (i + 1) + ". " + text);
+            } else {
+                views.setViewVisibility(viewId, View.GONE);
+            }
+            views.setOnClickPendingIntent(viewId, routeIntent(context, "schedule", 480 + i));
+        }
+        views.setViewVisibility(R.id.widget_empty, any ? View.GONE : View.VISIBLE);
+        manager.updateAppWidget(id, views);
+    }
+
+    private static int rowId(int index) {
+        switch (index) {
+            case 0: return R.id.widget_period_1;
+            case 1: return R.id.widget_period_2;
+            case 2: return R.id.widget_period_3;
+            case 3: return R.id.widget_period_4;
+            case 4: return R.id.widget_period_5;
+            case 5: return R.id.widget_period_6;
+            default: return R.id.widget_period_7;
+        }
+    }
+
+    private static String periodText(JSONObject period) {
+        if (period == null) return "";
+        String subject = period.optString("subject", "").trim();
+        String grade = period.optString("grade", "").trim();
+        String section = period.optString("section", "").trim();
+        String note = period.optString("note", "").trim();
+        StringBuilder label = new StringBuilder();
+        if (!subject.isEmpty()) label.append(subject);
+        if (!grade.isEmpty()) appendPart(label, "الصف " + grade);
+        if (!section.isEmpty()) appendPart(label, "الشعبة " + section);
+        if (label.length() == 0) return note;
+        if (!note.isEmpty() && !note.equals(subject)) appendPart(label, note);
+        return label.toString();
+    }
+
+    private static void appendPart(StringBuilder label, String part) {
+        if (label.length() > 0) label.append(" — ");
+        label.append(part);
+    }
+
+    private static PendingIntent dayAction(Context context, String action, int requestCode) {
+        Intent intent = new Intent(context, HomeWidgetProvider.class).setAction(action);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
+        return PendingIntent.getBroadcast(context, requestCode, intent, flags);
+    }
+
+    private static PendingIntent routeIntent(Context context, String route, int requestCode) {
+        Intent launch = new Intent(Intent.ACTION_VIEW, Uri.parse("moallem://open/" + route), context, MainActivity.class);
+        launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
+        return PendingIntent.getActivity(context, requestCode, launch, flags);
+    }
+
+    private static int currentSchoolDay() {
+        int day = Calendar.getInstance().get(Calendar.DAY_OF_WEEK);
+        if (day == Calendar.SUNDAY) return 0;
+        if (day >= Calendar.MONDAY && day <= Calendar.THURSDAY) return day - Calendar.MONDAY + 1;
+        return 0;
+    }
+}

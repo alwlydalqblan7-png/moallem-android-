@@ -1,3 +1,4 @@
+import { officialGradeColumns, officialGradeMaximum } from "./official-grade-distribution.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -31,15 +32,32 @@ import {
   FolderOpen,
   CalendarDays,
   Copy,
+  Share2,
   RefreshCw,
+  Bell,
+  Camera,
 } from "lucide-react";
 import { Printer } from "@capgo/capacitor-printer";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
+import { LocalNotifications } from "@capacitor/local-notifications";
 import "./styles.css";
 import moallemIcon from "./assets/moallem-icon.png";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { autoColorHtml, mergeSubjectOptions } from "./preparation-format.js";
+import { validateMoallemBackup } from "./backup-format.js";
+import { inspectDaftarBackup } from "./legacy-backup-inspector.js";
+import { attendanceDateKey, formatClassRoster, getDailyWidgetStatus, parseStudentNames, summarizeAttendance } from "./student-tools.js";
+import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
+import { calculateSciencePairSummary, calculateSubjectResult } from "./science-summary.js";
+import { buildStudentHomeworkMessage, filterHomeworkForClass, getHomeworkStatus, setHomeworkStatus, summarizeHomework } from "./homework.js";
+import { buildStudentIdentityCardHtml, buildStudentProfileHtml, collectStudentProfile } from "./student-profile.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+const HomeWidget = registerPlugin("HomeWidget");
+const BackupFile = registerPlugin("BackupFile");
+const ShareText = registerPlugin("ShareText");
+const localDateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
 const DEFAULT_GRADES = [
   "السابع",
@@ -75,6 +93,7 @@ const DEFAULT_SUBJECTS = [
   "التربية الموسيقية",
   "التربية الرياضية",
 ];
+const ADDED_SUBJECTS = ["العلوم", "الفيزياء والكيمياء"];
 const seedStudents = [
   { id: 1, name: "أحمد محمد", grade: "السابع", section: "أ" },
   { id: 2, name: "سارة خالد", grade: "السابع", section: "أ" },
@@ -106,6 +125,23 @@ const load = (k, f) => {
   }
 };
 const persist = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+const sanitizeRichHtml = (html) => {
+  const doc = new DOMParser().parseFromString(`<div>${html || ""}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  const allowed = new Set(["DIV","P","BR","SPAN","B","STRONG","I","EM","U","UL","OL","LI"]);
+  const clean = (node) => {
+    for (const child of [...node.childNodes]) {
+      if (child.nodeType === Node.TEXT_NODE) continue;
+      if (child.nodeType !== Node.ELEMENT_NODE || !allowed.has(child.tagName)) { child.replaceWith(...child.childNodes); continue; }
+      const color = child.style?.color;
+      for (const attr of [...child.attributes]) child.removeAttribute(attr.name);
+      if (/^(#[0-9a-f]{3,8}|rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\))$/i.test(color || "")) child.setAttribute("style", `color:${color}`);
+      clean(child);
+    }
+  };
+  clean(root);
+  return root.innerHTML;
+};
 
 const PDF_DB = "moallem_library";
 const PDF_STORE = "pdfs";
@@ -152,6 +188,68 @@ const deletePdfBlob = async (id) => {
   });
   db.close();
 };
+const listPdfBlobs = async () => {
+  const db = await openPdfDb();
+  const entries = await new Promise((resolve, reject) => {
+    const tx = db.transaction(PDF_STORE, "readonly");
+    const store = tx.objectStore(PDF_STORE);
+    const values = store.getAll();
+    const keys = store.getAllKeys();
+    tx.oncomplete = () => resolve(keys.result.map((key, i) => ({ id: String(key), blob: values.result[i] })));
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+  return entries;
+};
+const studentPhotoToDataUrl = (file) => new Promise((resolve, reject) => {
+  if (!file || !/^image\/(jpeg|png|webp)$/.test(file.type || "")) return reject(new Error("اختر صورة بصيغة JPG أو PNG أو WebP."));
+  if (file.size > 10 * 1024 * 1024) return reject(new Error("حجم الصورة كبير؛ اختر صورة أصغر من 10 ميغابايت."));
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error("تعذرت قراءة الصورة."));
+  reader.onload = () => {
+    const image = new Image();
+    image.onerror = () => reject(new Error("تعذر فتح الصورة."));
+    image.onload = () => {
+      const maxSide = 360;
+      const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext("2d");
+      if (!context) return reject(new Error("تعذر تجهيز الصورة."));
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      let dataUrl = "";
+      for (const quality of [0.82, 0.72, 0.62, 0.52]) {
+        dataUrl = canvas.toDataURL("image/jpeg", quality);
+        if (dataUrl.length <= 140 * 1024) break;
+      }
+      if (dataUrl.length > 140 * 1024) return reject(new Error("تعذر ضغط الصورة للحجم المناسب؛ اختر صورة أصغر."));
+      resolve(dataUrl);
+    };
+    image.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = () => reject(reader.error);
+  reader.readAsDataURL(blob);
+});
+const replaceDecodedPdfBlobs = async (decoded) => {
+  const db = await openPdfDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(PDF_STORE, "readwrite");
+      const store = tx.objectStore(PDF_STORE);
+      store.clear();
+      for (const pdf of decoded) store.put(pdf.blob, pdf.id);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("تعذرت استعادة ملفات PDF"));
+    });
+  } finally { db.close(); }
+};
 
 
 const extractAiText = (data) => {
@@ -188,6 +286,7 @@ const extractPdfText = async (bookId, startPage = 1, endPage = startPage) => {
   const pdf = await pdfjsLib.getDocument({ data }).promise;
   const from = Math.max(1, Number(startPage) || 1);
   const to = Math.min(pdf.numPages, Math.max(from, Number(endPage) || from));
+  if (to - from + 1 > 8) throw new Error("اختر نطاقاً لا يتجاوز 8 صفحات في كل طلب حتى لا تتأخر الخدمة.");
   const pages = [];
   for (let pageNumber = from; pageNumber <= to; pageNumber++) {
     const page = await pdf.getPage(pageNumber);
@@ -199,27 +298,219 @@ const extractPdfText = async (bookId, startPage = 1, endPage = startPage) => {
       .trim();
     pages.push(`الصفحة ${pageNumber}\n${text}`);
   }
+  const fullText = pages.join("\n\n");
   return {
     pageCount: pdf.numPages,
     startPage: from,
     endPage: to,
-    text: pages.join("\n\n"),
+    text: fullText.slice(0, 18000),
+    truncated: fullText.length > 18000,
   };
 };
 
 function App() {
+  const [schoolSettings, setSchoolSettings] = useState(() => load("m2_school_settings", { teacher:"", principal:"", school:"", directorate:"", year:"2026 - 2027", signature:"" }));
+  const [periodSettings, setPeriodSettings] = useState(() => load("m2_period_settings", [
+    ["08:00","08:40"],["08:40","09:20"],["09:20","10:00"],["10:15","10:55"],
+    ["10:55","11:35"],["11:50","12:25"],["12:25","13:00"]
+  ]));
+  const [widgetMessage, setWidgetMessage] = useState("");
+  const [widgetNow, setWidgetNow] = useState(() => new Date());
+  const dailyWidgetStatus = useMemo(
+    () => getDailyWidgetStatus(periodSettings, widgetNow),
+    [periodSettings, widgetNow],
+  );
+  const [soundSettings, setSoundSettings] = useState(() => load("m2_sound_settings", {enabled:false,start:true,end:true}));
+  const [notificationMessage, setNotificationMessage] = useState("");
+  useEffect(() => persist("m2_school_settings",schoolSettings),[schoolSettings]);
+  useEffect(() => persist("m2_period_settings",periodSettings),[periodSettings]);
+  useEffect(() => persist("m2_sound_settings",soundSettings),[soundSettings]);
+  useEffect(() => {
+    const timer = setInterval(() => setWidgetNow(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    HomeWidget.syncSchedule({ periods: periodSettings }).catch(() => {});
+  }, [periodSettings]);
+  const scheduleClassNotifications = async () => {
+    if (!Capacitor.isNativePlatform()) { setNotificationMessage("تنبيهات الخلفية متاحة في نسخة Android فقط."); return; }
+    try {
+      const pendingIds = Array.from({length: 500}, (_, i) => ({id: 260000 + i}));
+      if (!soundSettings.enabled || (!soundSettings.start && !soundSettings.end)) {
+        await LocalNotifications.cancel({notifications: pendingIds});
+        setNotificationMessage("أُوقفت تنبيهات الحصص.");
+        return;
+      }
+      let permission = await LocalNotifications.checkPermissions();
+      if (permission.display !== "granted") permission = await LocalNotifications.requestPermissions();
+      if (permission.display !== "granted") { setNotificationMessage("لم يُسمح للتطبيق بإظهار التنبيهات."); return; }
+      let exactAlarmsAllowed = true;
+      if (Capacitor.getPlatform() === "android") {
+        let exactSetting = await LocalNotifications.checkExactNotificationSetting();
+        if (exactSetting.exact_alarm !== "granted") exactSetting = await LocalNotifications.changeExactNotificationSetting();
+        exactAlarmsAllowed = exactSetting.exact_alarm === "granted";
+      }
+      await LocalNotifications.cancel({notifications: pendingIds});
+      const notifications = [];
+      const days = [1, 2, 3, 4, 5]; // الأحد إلى الخميس في تقويم Android
+      days.forEach((weekday, dayIndex) => periodSettings.forEach((times, periodIndex) => {
+        [["start", times?.[0], "بداية"], ["end", times?.[1], "نهاية"]].forEach(([key, time, label], eventIndex) => {
+          if (!soundSettings[key] || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time || "")) return;
+          const [hour, minute] = time.split(":").map(Number);
+          notifications.push({
+            id: 260000 + dayIndex * 100 + periodIndex * 2 + eventIndex,
+            title: `تنبيه ${label} الحصة ${periodIndex + 1}`,
+            body: `${label} الحصة ${periodIndex + 1} — ${WEEK_DAYS[dayIndex]}`,
+            schedule: { on: { weekday, hour, minute }, allowWhileIdle: true },
+            sound: "default",
+            channelId: "moallem-class-bells",
+          });
+        });
+      }));
+      if (!notifications.length) { setNotificationMessage("أدخل أوقاتاً صحيحة للحصص وفعّل بداية الحصة أو نهايتها."); return; }
+      await LocalNotifications.createChannel({id:"moallem-class-bells",name:"تنبيهات الحصص",description:"بداية الحصة ونهايتها",importance:5,sound:"default",visibility:1});
+      await LocalNotifications.schedule({notifications});
+      setNotificationMessage(`تمت جدولة ${notifications.length} تنبيهاً أسبوعياً.${exactAlarmsAllowed ? "" : " لم يُسمح بالتنبيه الدقيق؛ قد يتأخر بعضها وفق إدارة النظام."}`);
+    } catch (error) { setNotificationMessage(error?.message || "تعذرت جدولة التنبيهات."); }
+  };
+  const requestHomeWidget = async () => {
+    if (!Capacitor.isNativePlatform()) {
+      setWidgetMessage("إضافة الويدجت متاحة في نسخة Android فقط.");
+      return;
+    }
+    try {
+      const result = await HomeWidget.requestPin();
+      setWidgetMessage(result?.supported
+        ? "أرسلنا طلب إضافة دفتر المعلّم. وافق في نافذة الشاشة الرئيسية لإتمام الإضافة."
+        : "اضغط مطولاً على الشاشة الرئيسية، ثم اختر الأدوات > معلّم تجريبي > دفتر المعلّم.");
+    } catch {
+      setWidgetMessage("اضغط مطولاً على الشاشة الرئيسية، ثم اختر الأدوات > معلّم تجريبي > دفتر المعلّم.");
+    }
+  };
+  const exportSettingsBackup = async () => {
+    try {
+      const data = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith("m2_")) data[key] = localStorage.getItem(key);
+      }
+      const pdfs = await Promise.all((await listPdfBlobs()).map(async ({ id, blob }) => ({
+        id, data: await blobToDataUrl(blob),
+      })));
+      const payload = JSON.stringify({
+        format: "moallem-backup-v2", createdAt: new Date().toISOString(), data, pdfs,
+      });
+      const filename = "moallem-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+      if (Capacitor.isNativePlatform()) {
+        try {
+          await BackupFile.save({ filename, content: payload });
+          window.alert("تم حفظ النسخة الاحتياطية بنجاح في المكان الذي اخترته.");
+        } catch (error) {
+          if (String(error?.message || error).includes("CANCELLED")) return;
+          window.alert("تعذر حفظ النسخة: " + (error?.message || error));
+        }
+        return;
+      }
+      const blob = new Blob([payload], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      window.alert("تم طلب تنزيل النسخة. تأكد من وجود ملف " + filename + " في التنزيلات؛ لا تعتبر النسخ ناجحًا قبل التأكد.");
+    } catch (err) {
+      window.alert("فشل إنشاء النسخة الاحتياطية: " + (err?.message || "خطأ غير معروف"));
+    }
+  };
+  const importSettingsBackup = async (file) => {
+    if (!file) return;
+    try {
+      const backup = JSON.parse(await file.text());
+      const validated = validateMoallemBackup(backup);
+      const entries = Object.entries(validated.data);
+      if (!entries.length) throw new Error("النسخة لا تحتوي بيانات معلّم");
+      if (!window.confirm(`ستستبدل البيانات التي تحمل المفاتيح نفسها${backup.format === "moallem-backup-v2" ? `، وستستبدل مكتبة PDF بـ ${validated.pdfs.length} ملف` : ""}. احفظ نسخة احتياطية مستقلة قبل المتابعة. هل تريد الاستعادة؟`)) return;
+      const previousValues = Object.fromEntries(entries.map(([key]) => [key, localStorage.getItem(key)]));
+      const previousPdfs = backup.format === "moallem-backup-v2" ? await listPdfBlobs() : null;
+      try {
+        if (backup.format === "moallem-backup-v2") await replaceDecodedPdfBlobs(validated.pdfs);
+        for (const [key, value] of entries) localStorage.setItem(key, value);
+      } catch (writeError) {
+        let rollbackError = null;
+        for (const [key, value] of Object.entries(previousValues)) {
+          try {
+            if (value === null) localStorage.removeItem(key);
+            else localStorage.setItem(key, value);
+          } catch (error) { rollbackError ||= error; }
+        }
+        if (previousPdfs) {
+          try { await replaceDecodedPdfBlobs(previousPdfs); }
+          catch (error) { rollbackError ||= error; }
+        }
+        if (rollbackError) console.error("Backup restore rollback was incomplete", rollbackError);
+        throw writeError;
+      }
+      window.alert("اكتملت استعادة البيانات. سيعاد تحميل التطبيق الآن.");
+      window.location.reload();
+    } catch (err) {
+      window.alert("فشلت الاستعادة دون إكمال العملية: " + (err?.message || "خطأ غير معروف"));
+    }
+  };
+  const [fullPagePreparation, setFullPagePreparation] = useState(false);
+  const [legacyBackupReport, setLegacyBackupReport] = useState(null);
+  const [legacyBackupError, setLegacyBackupError] = useState("");
+  const inspectLegacyBackupFile = async (file) => {
+    if (!file) return;
+    setLegacyBackupReport(null);
+    setLegacyBackupError("");
+    try {
+      if (file.size > 20 * 1024 * 1024) throw new Error("الملف أكبر من 20 ميغابايت؛ افحصه على جهاز آمن قبل المتابعة");
+      const payload = JSON.parse(await file.text());
+      setLegacyBackupReport(inspectDaftarBackup(payload));
+    } catch (error) {
+      setLegacyBackupError(error?.message || "تعذر فحص النسخة");
+    }
+  };
   const [tab, setTab] = useState("home");
+  const [boardStrokes, setBoardStrokes] = useState(() => load("m2_board_strokes", []));
+  useEffect(() => persist("m2_board_strokes", boardStrokes), [boardStrokes]);
+  useEffect(() => {
+    const openRoute = (url) => {
+      try {
+        const path = new URL(url).pathname.replace(/^\//, "");
+        const routes = { home: "home", gradebook: "gradebook", attendance: "attendance", preparation: "ai", board: "board", schedule: "schedule" };
+        if (routes[path]) setTab(routes[path]);
+      } catch {}
+    };
+    let handle;
+    CapacitorApp.getLaunchUrl().then((launch) => launch?.url && openRoute(launch.url)).catch(() => {});
+    CapacitorApp.addListener("appUrlOpen", ({ url }) => openRoute(url)).then((listener) => { handle = listener; });
+    return () => { handle?.remove(); };
+  }, []);
   const [grades, setGrades] = useState(() => load("m2_grades", DEFAULT_GRADES));
   const [sections, setSections] = useState(() =>
     load("m2_sections", DEFAULT_SECTIONS),
   );
-  const [subjects, setSubjects] = useState(() =>
-    load("m2_subjects", DEFAULT_SUBJECTS),
-  );
+  const [subjects, setSubjects] = useState(() => {
+    const current = load("m2_subjects", DEFAULT_SUBJECTS);
+    // Add options without renaming/removing any subject that may own old records.
+    return mergeSubjectOptions(current, ADDED_SUBJECTS);
+  });
+  const [subjectTeachers, setSubjectTeachers] = useState(() => load("m2_subject_teachers", {}));
   const [students, setStudents] = useState(() =>
     load("m2_students", seedStudents),
   );
+  const [bulkNamesOpen, setBulkNamesOpen] = useState(false);
+  const [bulkNamesText, setBulkNamesText] = useState("");
+  const [bulkNamesMessage, setBulkNamesMessage] = useState("");
   const [attendance, setAttendance] = useState(() => load("m2_attendance", {}));
+  const [attendanceHistory, setAttendanceHistory] = useState(() => load("m2_attendance_history", {}));
+  const [attendanceDate, setAttendanceDate] = useState(() => localDateKey());
+  const [attendanceMessage, setAttendanceMessage] = useState("");
   const [gradebooks, setGradebooks] = useState(() => load("m2_gradebooks", {}));
   const [grade, setGrade] = useState(() => load("m2_grade", "السابع"));
   const [section, setSection] = useState(() => load("m2_section", "أ"));
@@ -238,6 +529,7 @@ function App() {
   const [online, setOnline] = useState(navigator.onLine);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiResult, setAiResult] = useState("");
+  const [aiRichContent, setAiRichContent] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [search, setSearch] = useState("");
@@ -252,7 +544,7 @@ function App() {
   const [plannerPeriods, setPlannerPeriods] = useState(3);
   const [plannerHolidays, setPlannerHolidays] = useState("");
   const [plannerTocStart, setPlannerTocStart] = useState(1);
-  const [plannerTocEnd, setPlannerTocEnd] = useState(12);
+  const [plannerTocEnd, setPlannerTocEnd] = useState(8);
   const [plannerGenerating, setPlannerGenerating] = useState(false);
   const [bookStartPage, setBookStartPage] = useState(1);
   const [bookEndPage, setBookEndPage] = useState(1);
@@ -260,6 +552,21 @@ function App() {
   const [savedPreparations, setSavedPreparations] = useState(() =>
     load("m2_saved_preparations", []),
   );
+  const [knowledgeBank, setKnowledgeBank] = useState(() => load("m2_knowledge_bank", []));
+  const [homeworkItems, setHomeworkItems] = useState(() => load("m2_homework", []));
+  const [homeworkFormOpen, setHomeworkFormOpen] = useState(false);
+  const [editingHomeworkId, setEditingHomeworkId] = useState(null);
+  const [homeworkDraft, setHomeworkDraft] = useState({ type: "واجب", title: "", subject: "", dueDate: "", details: "" });
+  const [studentNotes, setStudentNotes] = useState(() => load("m2_student_notes", []));
+  const [profileStudentId, setProfileStudentId] = useState(null);
+  const [studentNoteDraft, setStudentNoteDraft] = useState("");
+  const [studentPhotoMessage, setStudentPhotoMessage] = useState("");
+  const studentPhotoInputRef = useRef(null);
+  const [knowledgeQuery, setKnowledgeQuery] = useState("");
+  const [knowledgeTypeFilter, setKnowledgeTypeFilter] = useState("الكل");
+  const [knowledgeFormOpen, setKnowledgeFormOpen] = useState(false);
+  const [editingKnowledgeId, setEditingKnowledgeId] = useState(null);
+  const [knowledgeDraft, setKnowledgeDraft] = useState({title:"", type:"سؤال", subject:"", grade:"", section:"", content:""});
   const [editingPreparationId, setEditingPreparationId] = useState(null);
   const [savedPlans, setSavedPlans] = useState(() =>
     load("m2_curriculum_plans", []),
@@ -268,6 +575,25 @@ function App() {
   const [weeklySchedule, setWeeklySchedule] = useState(() =>
     load("m2_weekly_schedule", {}),
   );
+  const [scheduleEffectiveDate, setScheduleEffectiveDate] = useState(() => load("m2_schedule_effective_date", ""));
+  useEffect(() => persist("m2_schedule_effective_date", scheduleEffectiveDate), [scheduleEffectiveDate]);
+  const getSchedulePeriod = (day, index) => (weeklySchedule[day] || [])[index] || null;
+  const setScheduleCell = (day, index, value) => setWeeklySchedule((previous) => {
+    const periods = [...(previous[day] || [])];
+    while (periods.length <= index) periods.push({ id: Date.now() + periods.length, grade: "", section: "", subject: "", time: "" });
+    periods[index] = { ...periods[index], note: value };
+    return { ...previous, [day]: periods };
+  });
+  const escapePrint = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const scheduleCellText = (day, index) => {
+    const period = getSchedulePeriod(day, index);
+    if (!period) return "";
+    return period.note !== undefined ? period.note : [period.subject, period.grade && `الصف ${period.grade}`, period.section && `الشعبة ${period.section}`].filter(Boolean).join(" - ");
+  };
+  const printWeeklySchedule = () => {
+    const rows = WEEK_DAYS.map((day) => `<tr><th>${day}</th>${Array.from({length: 7}, (_, i) => `<td>${escapePrint(scheduleCellText(day, i))}</td>`).join("")}</tr>`).join("");
+    printDocument("البرنامج الأسبوعي", `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>@page{size:A4 landscape;margin:12mm}body{font-family:Arial,sans-serif;color:#222}h1{text-align:center;font-size:22px}.date{background:#f0ede2;padding:12px;margin:16px 0}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #777;text-align:center;padding:10px 4px;height:64px;white-space:pre-wrap;font-size:12px}th{background:#eee9d8}footer{margin-top:20px;background:#f0ede2;padding:16px;display:flex;justify-content:space-between}</style></head><body><h1>البرنامج الأسبوعي</h1><div class="date">يعمل بهذا البرنامج اعتباراً من: ${escapePrint(scheduleEffectiveDate)}</div><table><thead><tr><th>اليوم</th>${Array.from({length:7},(_,i)=>`<th>الدرس ${i+1}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table><footer><span>ملاحظات: ....................................</span><span>اسم المدرس وتوقيعه: ....................................</span></footer></body></html>`);
+  };
   const pdfInputRef = useRef(null);
   const [reportPreview, setReportPreview] = useState(false);
   const tabRef = useRef(tab);
@@ -310,8 +636,10 @@ function App() {
   useEffect(() => persist("m2_grades", grades), [grades]);
   useEffect(() => persist("m2_sections", sections), [sections]);
   useEffect(() => persist("m2_subjects", subjects), [subjects]);
+  useEffect(() => persist("m2_subject_teachers", subjectTeachers), [subjectTeachers]);
   useEffect(() => persist("m2_students", students), [students]);
   useEffect(() => persist("m2_attendance", attendance), [attendance]);
+  useEffect(() => persist("m2_attendance_history", attendanceHistory), [attendanceHistory]);
   useEffect(() => persist("m2_gradebooks", gradebooks), [gradebooks]);
   useEffect(() => persist("m2_grade", grade), [grade]);
   useEffect(() => persist("m2_section", section), [section]);
@@ -322,10 +650,19 @@ function App() {
     () => persist("m2_weekly_schedule", weeklySchedule),
     [weeklySchedule],
   );
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    HomeWidget.syncSchedule({ schedule: weeklySchedule }).catch((error) => {
+      console.warn("تعذرت مزامنة البرنامج مع ويدجت أندرويد", error);
+    });
+  }, [weeklySchedule]);
   useEffect(
     () => persist("m2_saved_preparations", savedPreparations),
     [savedPreparations],
   );
+  useEffect(() => persist("m2_knowledge_bank", knowledgeBank), [knowledgeBank]);
+  useEffect(() => persist("m2_homework", homeworkItems), [homeworkItems]);
+  useEffect(() => persist("m2_student_notes", studentNotes), [studentNotes]);
   useEffect(() => {
     if (!plannerBook) return;
     // الكتاب مصدر مستقل؛ المادة/الفرع يحددان طريقة التحضير فقط.
@@ -339,20 +676,28 @@ function App() {
     () => students.filter((s) => s.grade === grade && s.section === section),
     [students, grade, section],
   );
+  const profileStudent = students.find((student) => String(student.id) === String(profileStudentId)) || null;
+  const studentProfile = useMemo(() => profileStudent ? collectStudentProfile({
+    student: profileStudent, gradebooks, attendanceHistory, homeworkItems, notes: studentNotes, officialGradeMaximum, legacyAttendance: attendance,
+  }) : null, [profileStudent, gradebooks, attendanceHistory, homeworkItems, studentNotes, attendance]);
+  const bulkNameList = useMemo(() => parseStudentNames(bulkNamesText), [bulkNamesText]);
+  const bulkDuplicateCount = useMemo(() => {
+    const seen = new Set(classStudents.map((student) => student.name.replace(/\s+/g, " ").trim().toLocaleLowerCase("ar")));
+    let count = 0;
+    for (const name of bulkNameList) {
+      const normalized = name.replace(/\s+/g, " ").trim().toLocaleLowerCase("ar");
+      if (seen.has(normalized)) count++;
+      seen.add(normalized);
+    }
+    return count;
+  }, [classStudents, bulkNameList]);
   const visibleStudents = useMemo(
     () => classStudents.filter((s) => !search || s.name.includes(search)),
     [classStudents, search],
   );
-  const availableSubjects = useMemo(
-    () =>
-      GENERAL_SCIENCE_GRADES.includes(grade)
-        ? subjects.filter(
-            (s) =>
-              !["الفيزياء", "الكيمياء", "علم الأحياء", "علم الأرض"].includes(s),
-          )
-        : subjects,
-    [subjects, grade],
-  );
+  // Keep standalone subject choices available in every grade. The legacy
+  // aggregate "العلوم العامة" branch remains available without hiding them.
+  const availableSubjects = subjects;
   const preparationSubject = isGeneralScience ? sciencePrepSubject : subject;
   const aiBooks = useMemo(
     () => libraryBooks.filter((b) => b.grade === grade),
@@ -360,14 +705,22 @@ function App() {
   );
   const bookKey = `${grade}|${section}|${subject}`;
   const book = gradebooks[bookKey] || {
-    columns:
-      subject === "العلوم العامة" && GENERAL_SCIENCE_GRADES.includes(grade)
-        ? scienceTotalColumns
-        : seedColumns,
+    columns: officialGradeColumns(grade, subject) || seedColumns,
     marks: {},
   };
   const updateBook = (next) =>
     setGradebooks((g) => ({ ...g, [bookKey]: next }));
+  const applyOfficialDistribution = () => {
+    const columns = officialGradeColumns(grade, subject);
+    if (!columns) return;
+    const hasMarks = Object.values(book.marks || {}).some(row =>
+      Object.values(row || {}).some(value => value !== "" && value != null));
+    if (hasMarks) {
+      window.alert("هذا الدفتر يحتوي على علامات محفوظة. حفاظًا عليها، لا يمكن استبدال أعمدته تلقائيًا. أنشئ نسخة احتياطية وعدّل الأعمدة يدويًا.");
+      return;
+    }
+    updateBook({ ...book, columns });
+  };
   const addColumn = () =>
     updateBook({
       ...book,
@@ -397,27 +750,73 @@ function App() {
         ...book.marks,
         [sid]: {
           ...(book.marks[sid] || {}),
-          [cid]: val === "" ? "" : Number(val),
+          [cid]: normalizeMarkInput(val, book.columns.find((column) => column.id === cid)?.max),
         },
       },
     });
+  const officialMax = officialGradeMaximum(grade, subject);
+  const split200 = Boolean(officialMax);
+  const finalExamColumn = book.columns.find(c => c.id === "official_final_exam");
+  const ensureFinalExam = () => {
+    if (finalExamColumn) return;
+    updateBook({ ...book, columns: [...book.columns, {
+      id: "official_final_exam", name: "الامتحان الأخير", max: officialMax, type: "امتحان نهائي",
+    }] });
+  };
   const calc = (s) => {
     const m = book.marks[s.id] || {};
-    let got = 0,
-      max = 0;
-    book.columns.forEach((c) => {
-      if (m[c.id] !== "" && m[c.id] != null && !Number.isNaN(Number(m[c.id]))) {
-        got += Number(m[c.id]);
-        max += Number(c.max) || 0;
-      }
-    });
+    const totals = calculateGradebookTotals(m, book.columns);
+    let { earned: got, maximum: max } = totals;
+    if (split200 && finalExamColumn) {
+      const workCols = book.columns.filter(c => c.id !== "official_final_exam");
+      const works = calculateGradebookTotals(m, workCols).earned;
+      const exam = m.official_final_exam === "" || m.official_final_exam == null ? null : normalizeMarkInput(m.official_final_exam, finalExamColumn.max);
+      const final = exam == null ? null : (works + exam) / 2;
+      return { got: final ?? works, max: officialMax, pct: Math.round(((final ?? works) / officialMax) * 1000) / 10,
+        works, exam, final, split: true };
+    }
+    if (subject === "العلوم" || subject === "الفيزياء والكيمياء") {
+      const result = calculateSubjectResult(book, s.id, officialMax);
+      const max = result.maximum ?? 0;
+      return { got: result.value ?? result.earned, max, pct: max ? Math.round(((result.value ?? result.earned) / max) * 1000) / 10 : 0,
+        works: result.value ?? result.earned, exam: null, final: result.value ?? result.earned, split: true, pendingExam: result.pendingExam };
+    }
     return { got, max, pct: max ? Math.round((got / max) * 1000) / 10 : 0 };
   };
+  const showSciencePairSummary = subject === "العلوم" || subject === "الفيزياء والكيمياء" || subject === "العلوم العامة";
   const addStudent = () =>
     setStudents((x) => [
       ...x,
       { id: Date.now(), name: "طالب جديد", grade, section },
     ]);
+  const addStudentsFromList = () => {
+    if (!bulkNameList.length) {
+      setBulkNamesMessage("ألصق الأسماء أولاً، اسمًا في كل سطر.");
+      return;
+    }
+    if (bulkDuplicateCount && !window.confirm(`توجد ${bulkDuplicateCount} أسماء مكررة في القائمة أو مسجلة في هذا الصف. ستبقى كطلاب مستقلين إذا أضفتها. هل تريد المتابعة؟`)) return;
+    const createdAt = Date.now();
+    const additions = bulkNameList.map((name, index) => ({
+      id: globalThis.crypto?.randomUUID?.() || `bulk-${createdAt}-${index}`,
+      name,
+      grade,
+      section,
+    }));
+    setStudents((current) => [...current, ...additions]);
+    setBulkNamesMessage(`تمت إضافة ${additions.length} طالبًا إلى ${grade} — الشعبة ${section}.`);
+    setBulkNamesText("");
+    setBulkNamesOpen(false);
+  };
+  const loadStudentNamesFile = async (file) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      setBulkNamesText(text);
+      setBulkNamesMessage(`تم تحميل الملف؛ عُثر على ${parseStudentNames(text).length} اسمًا.`);
+    } catch {
+      setBulkNamesMessage("تعذرت قراءة الملف. جرّب ملف CSV أو TXT بترميز UTF-8.");
+    }
+  };
   const renameStudent = (id, name) =>
     setStudents((x) => x.map((s) => (s.id === id ? { ...s, name } : s)));
   const deleteStudent = (id) =>
@@ -430,8 +829,43 @@ function App() {
       const b = x.filter((s) => !(s.grade === grade && s.section === section));
       return [...b, ...a];
     });
-  const setAtt = (id, v) =>
-    setAttendance((a) => ({ ...a, [`${grade}|${section}|${id}`]: v }));
+  const setAtt = (id, status, note) => {
+    const key = attendanceDateKey(grade, section, attendanceDate);
+    setAttendanceHistory((previous) => {
+      const day = { ...(previous[key] || {}) };
+      const old = day[id] || {};
+      const next = { ...old };
+      if (status) next.status = status;
+      if (note !== undefined) next.note = note;
+      day[id] = next;
+      return { ...previous, [key]: day };
+    });
+  };
+  const shareText = async (text, title) => {
+    try {
+      if (Capacitor.isNativePlatform()) await ShareText.share({ text, title });
+      else if (navigator.share) await navigator.share({ text, title });
+      else {
+        await navigator.clipboard.writeText(text);
+        setAttendanceMessage("نُسخت القائمة إلى الحافظة.");
+      }
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      try {
+        await navigator.clipboard.writeText(text);
+        setAttendanceMessage("تعذرت المشاركة المباشرة؛ نُسخت القائمة إلى الحافظة.");
+      } catch {
+        setAttendanceMessage("تعذرت المشاركة. تحقق من صلاحية الحافظة في المتصفح.");
+      }
+    }
+  };
+  const shareClassRoster = () => shareText(formatClassRoster(students, grade, section), `طلاب ${grade} — ${section}`);
+  const copyClassRoster = async () => {
+    try {
+      await navigator.clipboard.writeText(formatClassRoster(students, grade, section));
+      setAttendanceMessage(`نُسخت قائمة ${grade} — الشعبة ${section} إلى الحافظة.`);
+    } catch { setAttendanceMessage("تعذر نسخ القائمة إلى الحافظة."); }
+  };
   const addItem = (kind) => {
     const v = prompt(`اكتب اسم ${kind} الجديد`);
     if (!v?.trim()) return;
@@ -644,7 +1078,7 @@ function App() {
         "https://moallem-ai.liondangerous65.workers.dev/api/ai"
       ).trim();
       const promptText = `أنت مخطط منهاج للمدرس وفق الكتاب المدرسي السوري المرفق نصه أدناه.
-ممنوع اختراع أسماء وحدات أو دروس غير موجودة في النص.
+ممنوع اختراع أسماء وحدات أو دروس غير موجودة في النص.${extracted.truncated ? " تنبيه: تم اختصار النص المرجعي عند حد حجم الطلب؛ صرّح بذلك ولا تستنتج من الصفحات التي لم يصل نصها." : ""}
 
 الصف: ${plannerBook.grade}
 المادة: ${plannerBook.subject}
@@ -742,6 +1176,8 @@ ${extracted.text}
     setAiLoading(true);
     setAiError("");
     setLibraryMessage("جاري قراءة صفحات الكتاب...");
+    let extractedTextForFallback = "";
+    let aiTimeout;
     try {
       const extracted = await extractPdfText(
         plannerBook.id,
@@ -752,41 +1188,15 @@ ${extracted.text}
         throw new Error(
           "لم يتم العثور على نص قابل للقراءة في الصفحات المحددة.",
         );
+      extractedTextForFallback = extracted.text;
       const lessonName = bookLessonTitle.trim() || "الدرس المحدد";
-      const promptText = `أنت مساعد معلم للمنهاج السوري.
-اعتمد حصراً على نص الكتاب المرفق أدناه، ولا تضف معلومات أو دروس غير موجودة فيه.
-
-الصف: ${plannerBook.grade}
-الشعبة: ${section}
-المادة: ${preparationSubject}
-اسم الكتاب الظاهر: ${plannerBook.title}
-اسم ملف PDF الحقيقي: ${plannerBook.fileName || plannerBook.title}
-تصنيف الكتاب في المكتبة: ${plannerBook.subject}${plannerBook.branch ? ` / ${plannerBook.branch}` : ""}
-عنوان الدرس/الوحدة: ${lessonName}
-التاريخ: ${lessonDate}
-الصفحات: ${extracted.startPage} إلى ${extracted.endPage}
-
-أنشئ نموذج التحضير الحديث المعتمد للعام الدراسي 2026-2027، منظماً بعناوين واضحة وبالترتيب التالي:
-1) المعلومات العامة: المادة، الصف، الشعبة، عنوان الدرس/الوحدة، التاريخ، اسم الكتاب والصفحات.
-2) النواتج والمخرجات التعليمية: أهداف سلوكية/معرفية واضحة وقابلة للقياس ومناسبة لطبيعة المادة. في الفقه والتفسير والحديث واللغة العربية صغها بما يلائم طبيعة المادة، وفي العلوم أدرج الفهم والتطبيق والملاحظة والاستنتاج عند ملاءمتها للنص.
-3) الاستراتيجيات والأنشطة التعليمية التعلمية: اختر ما يلائم الدرس مثل العصف الذهني، الحوار والمناقشة، التعلم النشط، التعلم التعاوني، والنشاط أو التجربة العملية عندما يدعمها محتوى الكتاب.
-4) الوسائل والتقنيات التعليمية: الكتاب المدرسي، السبورة، والعروض أو الصور أو الأدوات أو المصادر الإثرائية المناسبة دون افتراض توفر وسيلة غير لازمة.
-5) سير الدرس: تمهيد، عرض وشرح منظم خطوة بخطوة، المفاهيم الأساسية، الأنشطة والتطبيق، وتوزيع زمن الحصة/الحصص بصورة عملية.
-6) التقويم المرحلي: أسئلة أو تطبيقات موزعة أثناء الدرس لقياس تحقق النواتج، مع إجابات/مؤشرات إجابة مختصرة عند الحاجة.
-7) التقويم النهائي: أسئلة أو مهمة ختامية تقيس تحقق النواتج فعلاً، مع الإجابات أو معايير التصحيح.
-8) الواجب المنزلي والملاحظات: واجب مرتبط مباشرة بالدرس، ثم ملاحظات عملية للمعلم.
-9) أسئلة داعمة من محتوى الدرس عند ملاءمتها: أسئلة شفهية، اختيار من متعدد، صح/خطأ مع التصحيح، وأسئلة تفكير واستنتاج. لا تفرض عدداً مصطنعاً إذا كان النص لا يدعمه.
-10) ملخص سريع للدرس يصلح للمراجعة.
-
-قواعد إلزامية: اجعل نص الكتاب المصدر الأساسي للتحضير. لا تخترع حقائق أو تجارب أو أحكاماً غير موجودة أو غير مدعومة بالنص. اجعل التحضير عملياً وقابلاً للتعديل والحفظ والطباعة داخل تطبيق معلّم. إذا كان جزء من المطلوب غير واضح في الصفحات فاذكر ذلك صراحة بدلاً من اختلاق المحتوى.
-
-لا تخلط مادة ${preparationSubject} مع أي فرع آخر من العلوم العامة.`;
+      const promptText = `أنشئ تحضير درس عربيًا عمليًا بعناوين واضحة قابلة للتعديل. لا تدّعِ أن ترتيب العناوين أو القالب معتمد رسميًا؛ لم يُتحقق من نموذج وزاري منشور. اعتمد حصراً على نص الكتاب المرجعي المرفق، وافصل مادة ${preparationSubject} عن فروع العلوم الأخرى. لا تخترع معلومة أو تجربة؛ اذكر بوضوح ما لا يدعمه النص. بيانات الدرس: الصف ${plannerBook.grade}، الشعبة ${section}، المادة ${preparationSubject}، العنوان ${lessonName}، التاريخ ${lessonDate}، الصفحات ${extracted.startPage}-${extracted.endPage}.`;
       const endpoint = (
         import.meta.env.VITE_AI_API_URL ||
         "https://moallem-ai.liondangerous65.workers.dev/api/ai"
       ).trim();
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 90000);
+      aiTimeout = setTimeout(() => controller.abort(), 150000);
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -808,11 +1218,11 @@ ${extracted.text}
             pageEnd: extracted.endPage,
             totalPages: extracted.pageCount,
             task: "lesson_preparation",
+            referenceTruncated: extracted.truncated,
           },
         }),
         signal: controller.signal,
       });
-      clearTimeout(timer);
       const raw = await response.text();
       let data = {};
       try {
@@ -821,7 +1231,7 @@ ${extracted.text}
         data = { text: raw };
       }
       if (!response.ok) {
-        const detail = data?.message || data?.code || "";
+        const detail = [data?.message || data?.code, Number.isFinite(data?.durationMs) ? `زمن الخادم ${Math.round(data.durationMs / 1000)} ثانية` : ""].filter(Boolean).join(" · ");
         throw new Error(
           `${data?.error || `خطأ من الخادم (${response.status})`}${detail ? ` — ${detail}` : ""}`,
         );
@@ -836,24 +1246,56 @@ ${extracted.text}
       setAiResult(String(text));
       setAiPrompt(`تحضير من كتاب ${plannerBook.title} — ${lessonName}`);
       setLibraryMessage(
-        `تم تحضير ${lessonName} من الصفحات ${extracted.startPage}-${extracted.endPage}.`,
+        `تم تحضير ${lessonName} من الصفحات ${extracted.startPage}-${extracted.endPage} وحُفظ تلقائياً في التحاضير.${extracted.truncated ? " تنبيه: اختُصر نص المصدر عند 18,000 محرف." : ""}${data?.durationMs ? ` زمن الخدمة: ${Math.round(data.durationMs / 1000)} ث.` : ""}`,
       );
+      saveCurrentPreparation(String(text), lessonName);
       setTab("ai");
     } catch (err) {
       const message =
         err?.name === "AbortError"
           ? "انتهت مهلة الاتصال بالذكاء. حاول مجدداً."
           : err?.message || "تعذر تحضير الدرس من الكتاب.";
-      setAiError(message);
-      setLibraryMessage(message);
+      if (err?.name === "AbortError" && extractedTextForFallback) {
+        const sourceExcerpt = extractedTextForFallback.slice(0, 14000);
+        setAiResult(`مسودة من نص الكتاب — لم يكتمل اتصال الذكاء الاصطناعي
+
+الموضوع: ${bookLessonTitle.trim() || "الدرس المحدد"}
+
+التهيئة
+تُكتب بعد مراجعة نص الدرس أدناه.
+
+الأهداف التعليمية
+تُستخرج من نص الدرس أدناه وتُراجع من المعلم.
+
+سير الدرس
+النص المستخرج من الصفحات المحددة:
+${sourceExcerpt}
+
+التقويم المرحلي
+يُعدّ المعلم أسئلة مرتبطة بالنص أعلاه.
+
+التقويم النهائي
+يُحدّد بعد مراجعة الأهداف التعليمية.
+
+الإغلاق والتغذية الراجعة
+يُستكمل بعد تنفيذ الدرس.`);
+        setAiError("انتهت مهلة خدمة الذكاء. عُرضت مسودة من نص الكتاب فقط، وليست تحضيراً مولّداً بالذكاء. راجعها وعدّلها قبل الحفظ.");
+        setLibraryMessage("تعذّر التحضير الذكي، لكن نص الصفحات المستخرج متاح للمراجعة.");
+      } else {
+        setAiError(message);
+        setLibraryMessage(message);
+      }
     } finally {
+      clearTimeout(aiTimeout);
       setAiLoading(false);
     }
   };
-  const saveCurrentPreparation = () => {
-    if (!aiResult.trim()) return;
-    const title = (bookLessonTitle || aiPrompt || "تحضير درس").trim();
+  const saveCurrentPreparation = (content = aiResult, titleOverride = "") => {
+    if (!String(content || "").trim()) return;
+    const title = (titleOverride || bookLessonTitle || aiPrompt || "تحضير درس").trim();
+    const previous = savedPreparations.find(v=>v.id===editingPreparationId) || {};
     const item = {
+      ...previous,
       id: editingPreparationId || Date.now(),
       title,
       grade,
@@ -865,7 +1307,8 @@ ${extracted.text}
       bookTitle: plannerBook?.title || "",
       pageStart: bookStartPage,
       pageEnd: bookEndPage,
-      content: aiResult,
+      content: String(content),
+      richContent: aiRichContent || previous.richContent || autoColorHtml(content),
       updatedAt: new Date().toISOString(),
     };
     setSavedPreparations((x) => [item, ...x.filter((v) => v.id !== item.id)]);
@@ -873,6 +1316,7 @@ ${extracted.text}
   };
   const openPreparation = (item) => {
     setAiResult(item.content);
+    setAiRichContent(item.richContent || "");
     setAiPrompt(item.title);
     setGrade(item.grade || grade);
     setSection(item.section || section);
@@ -889,25 +1333,208 @@ ${extracted.text}
     setEditingPreparationId(item.id);
     setTab("ai");
   };
+  const classHomework = useMemo(() => filterHomeworkForClass(homeworkItems, grade, section), [homeworkItems, grade, section]);
+  const openStudentProfile = (student) => {
+    setProfileStudentId(student.id);
+    setStudentNoteDraft("");
+    setStudentPhotoMessage("");
+    setTab("student-profile");
+  };
+  const saveStudentPhoto = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !profileStudent) return;
+    try {
+      const photo = await studentPhotoToDataUrl(file);
+      const nextStudents = students.map((student) => String(student.id) === String(profileStudent.id) ? { ...student, photo } : student);
+      localStorage.setItem("m2_students", JSON.stringify(nextStudents));
+      setStudents(nextStudents);
+      setStudentPhotoMessage("تم حفظ الصورة على هذا الجهاز، وستدخل ضمن النسخ الاحتياطية الجديدة.");
+    } catch (error) {
+      setStudentPhotoMessage(error?.name === "QuotaExceededError"
+        ? "مساحة التخزين غير كافية لحفظ الصورة. خفّف الصور أو احذف صورة قديمة بعد التأكد من وجود نسخة احتياطية."
+        : error?.message || "تعذر حفظ الصورة.");
+    }
+  };
+  const removeStudentPhoto = () => {
+    if (!profileStudent || !confirm("حذف صورة هذا الطالب؟")) return;
+    const nextStudents = students.map((student) => {
+      if (String(student.id) !== String(profileStudent.id)) return student;
+      const { photo, ...withoutPhoto } = student;
+      return withoutPhoto;
+    });
+    try {
+      localStorage.setItem("m2_students", JSON.stringify(nextStudents));
+      setStudents(nextStudents);
+      setStudentPhotoMessage("تم حذف صورة هذا الطالب.");
+    } catch {
+      setStudentPhotoMessage("تعذر تحديث بيانات الطالب.");
+    }
+  };
+  const printStudentIdentityCard = () => {
+    if (!profileStudent) return;
+    printDocument(`بطاقة الطالب ${profileStudent.name}`, buildStudentIdentityCardHtml(profileStudent, schoolSettings));
+  };
+  const saveStudentNote = () => {
+    const text = studentNoteDraft.trim();
+    if (!profileStudent || !text) return;
+    setStudentNotes((items) => [{ id: `student-note-${Date.now()}`, studentId: profileStudent.id, text, createdAt: new Date().toISOString() }, ...items]);
+    setStudentNoteDraft("");
+  };
+  const deleteStudentNote = (noteId) => {
+    if (confirm("حذف هذه الملاحظة فقط؟")) setStudentNotes((items) => items.filter((note) => note.id !== noteId));
+  };
+  const printStudentProfile = () => {
+    if (!studentProfile) return;
+    printDocument(`ملف متابعة ${profileStudent.name}`, buildStudentProfileHtml(studentProfile, schoolSettings));
+  };
+  const shareStudentProfileHomework = () => {
+    if (!studentProfile) return;
+    shareText(buildStudentHomeworkMessage({
+      grade: profileStudent.grade, section: profileStudent.section, student: profileStudent, items: studentProfile.homework,
+    }), `متابعة ${profileStudent.name}`);
+  };
+  const resetHomeworkDraft = () => {
+    setHomeworkDraft({ type: "واجب", title: "", subject, dueDate: "", details: "" });
+    setEditingHomeworkId(null);
+    setHomeworkFormOpen(true);
+  };
+  const editHomeworkItem = (item) => {
+    setHomeworkDraft({ type: item.type || "واجب", title: item.title || "", subject: item.subject || subject, dueDate: item.dueDate || "", details: item.details || "" });
+    setEditingHomeworkId(item.id);
+    setHomeworkFormOpen(true);
+  };
+  const saveHomeworkItem = () => {
+    const title = homeworkDraft.title.trim();
+    if (!title || !homeworkDraft.subject) {
+      alert("أدخل عنوان الواجب واختر المادة قبل الحفظ.");
+      return;
+    }
+    const now = new Date().toISOString();
+    if (editingHomeworkId != null) {
+      setHomeworkItems((items) => items.map((item) => item.id === editingHomeworkId
+        ? { ...item, ...homeworkDraft, title, grade: item.grade, section: item.section, updatedAt: now }
+        : item));
+    } else {
+      setHomeworkItems((items) => [{
+        id: `homework-${Date.now()}`, ...homeworkDraft, title, grade, section, statuses: {}, createdAt: now, updatedAt: now,
+      }, ...items]);
+    }
+    setHomeworkFormOpen(false);
+    setEditingHomeworkId(null);
+    setHomeworkDraft({ type: "واجب", title: "", subject, dueDate: "", details: "" });
+  };
+  const deleteHomeworkItem = (id) => {
+    if (confirm("حذف هذا الواجب أو التذكرة؟")) setHomeworkItems((items) => items.filter((item) => item.id !== id));
+  };
+  const markHomeworkStatus = (itemId, studentId, status) => {
+    setHomeworkItems((items) => setHomeworkStatus(items, itemId, studentId, status));
+  };
+  const shareHomeworkWithParent = (student) => shareText(
+    buildStudentHomeworkMessage({ grade, section, student, items: classHomework }),
+    "متابعة الواجبات",
+  );
+  const shareClassHomework = () => {
+    if (!classHomework.length) return;
+    const lines = classHomework.map((item) => {
+      const counts = summarizeHomework(item, classStudents);
+      return `• ${item.type}: ${item.title} — ${item.subject}${item.dueDate ? ` — الموعد ${item.dueDate}` : ""}
+لم يسلّم: ${counts.pending} | سلّم: ${counts.submitted} | غائب: ${counts.absent}`;
+    });
+    shareText(`متابعة واجبات الصف ${grade} — الشعبة ${section}\n${lines.join("\n")}\n\nهذه رسالة للمشاركة فقط؛ لا تُرسل تلقائيًا.`, "ملخص واجبات الشعبة");
+  };
+  const resetKnowledgeDraft = () => {
+    setKnowledgeDraft({title:"",type:"سؤال",subject,grade,section,content:""});
+    setEditingKnowledgeId(null);
+    setKnowledgeFormOpen(true);
+  };
+  const saveKnowledgeItem = () => {
+    if (!knowledgeDraft.title.trim() || !knowledgeDraft.content.trim()) {
+      alert("أدخل عنواناً ومحتوى قبل الحفظ.");
+      return;
+    }
+    const now = new Date().toISOString();
+    if (editingKnowledgeId != null) {
+      setKnowledgeBank(items => items.map(item => item.id === editingKnowledgeId ? {...item,...knowledgeDraft,title:knowledgeDraft.title.trim(),content:knowledgeDraft.content.trim(),updatedAt:now} : item));
+    } else {
+      setKnowledgeBank(items => [{id:`knowledge-${Date.now()}`,...knowledgeDraft,title:knowledgeDraft.title.trim(),content:knowledgeDraft.content.trim(),createdAt:now,updatedAt:now},...items]);
+    }
+    setKnowledgeFormOpen(false);
+    setEditingKnowledgeId(null);
+  };
+  const editKnowledgeItem = (item) => {
+    setKnowledgeDraft({title:item.title || "",type:item.type || "سؤال",subject:item.subject || subject,grade:item.grade || grade,section:item.section || section,content:item.content || ""});
+    setEditingKnowledgeId(item.id);
+    setKnowledgeFormOpen(true);
+  };
+  const deleteKnowledgeItem = (id) => {
+    if (confirm("حذف هذا العنصر من بنك المعلومات؟")) setKnowledgeBank(items => items.filter(item => item.id !== id));
+  };
+  const visibleKnowledgeItems = knowledgeBank.filter(item => {
+    const query=knowledgeQuery.trim().toLocaleLowerCase();
+    const matchesQuery=!query || `${item.title} ${item.content} ${item.subject} ${item.grade}`.toLocaleLowerCase().includes(query);
+    return matchesQuery && (knowledgeTypeFilter === "الكل" || item.type === knowledgeTypeFilter);
+  });
   const deletePreparation = (id) => {
     if (confirm("حذف هذا التحضير؟")) {
       setSavedPreparations((x) => x.filter((v) => v.id !== id));
       if (editingPreparationId === id) setEditingPreparationId(null);
     }
   };
-  const updateCurrentPreparation = (text) => {
+  const updateCurrentPreparation = (text, html = aiRichContent) => {
     setAiResult(text);
+    setAiRichContent(html);
     if (editingPreparationId)
       setSavedPreparations((x) =>
         x.map((v) =>
           v.id === editingPreparationId
-            ? { ...v, content: text, updatedAt: new Date().toISOString() }
+            ? { ...v, content: text, richContent: html, updatedAt: new Date().toISOString() }
             : v,
         ),
       );
   };
-  const buildPreparationHtml = (item) =>
-    `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>body{font-family:Arial;padding:28px;line-height:1.9;color:#173653}h1{text-align:center;color:#1c3f66}.meta{background:#f5f7fa;padding:12px;border-radius:10px;margin-bottom:16px}pre{white-space:pre-wrap;font-family:Arial;font-size:14px}</style></head><body><h1>${item.title}</h1><div class="meta">المادة: ${item.subject || ""} · الصف: ${item.grade || ""} · الشعبة: ${item.section || ""} · التاريخ: ${item.lessonDate || ""}${item.bookTitle ? `<br>الكتاب: ${item.bookTitle}` : ""}${item.pageStart ? ` · الصفحات: ${item.pageStart}-${item.pageEnd}` : ""}</div><pre>${item.content.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre></body></html>`;
+  // Print one complete A4 lesson sheet, using the attached notebook page as a visual reference.
+  // Keep the saved rich HTML intact so automatic and manual text colors carry through to PDF.
+  const buildPreparationHtml = (item) => {
+    const safe = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const richContent = sanitizeRichHtml(item.richContent || autoColorHtml(item.content || ""));
+    const date = item.lessonDate || "";
+    const day = date ? new Intl.DateTimeFormat("ar-SY", { weekday: "long" }).format(new Date(`${date}T12:00:00`)) : "";
+    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
+      @page{size:A4 portrait;margin:7mm}
+      *{box-sizing:border-box;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+      html,body{margin:0;padding:0;font-family:Arial,Tahoma,sans-serif;color:#111;direction:rtl}
+      body{font-size:11px;line-height:1.45}
+      .sheet{min-height:282mm;display:flex;flex-direction:column;border:1px solid #888;padding:5mm}
+      h1{text-align:center;font-size:17px;line-height:1.25;margin:0 0 3mm;color:#1769aa}
+      .school{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #777;padding:0 1mm 2mm;margin-bottom:2mm;font-size:10px}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}
+      td,th{border:1px solid #777;padding:2mm 2.4mm;vertical-align:middle;overflow-wrap:anywhere}
+      th{width:15%;background:#f2f0e8;text-align:right;color:#1769aa;font-weight:700}
+      td{height:9mm}
+      .content-title{margin-top:2mm;padding:1.8mm 2.4mm;background:#f2f0e8;border:1px solid #777;border-bottom:0;color:#1769aa;font-weight:bold}
+      .content{flex:1;min-height:170mm;border:1px solid #777;padding:3mm 4mm;line-height:1.75;overflow-wrap:anywhere;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 8.5mm,#d8d8d8 8.6mm,#d8d8d8 8.75mm);background-position:0 2mm}
+      .content p{margin:0 0 1.1em}.content h1,.content h2,.content h3,.content strong{color:inherit}
+      .foot{padding-top:2mm;font-size:9px;color:#333}
+      .signatures{display:flex;justify-content:space-between;align-items:flex-end;gap:10mm;margin-top:3mm;padding-top:2mm;border-top:1px solid #777;min-height:18mm}
+      .signature img{display:block;height:14mm;max-width:42mm;object-fit:contain;margin-top:1mm}
+      @media screen{body{background:#e8edf1;padding:12px}.sheet{background:#fff;max-width:210mm;margin:0 auto 12px;box-shadow:0 2px 8px #0002}}
+      @media print{.sheet{margin:0;box-shadow:none}}
+      </style></head><body><article class="sheet">
+      <h1>تحضير الدرس</h1>
+      <div class="school"><span>المدرسة: ${safe(schoolSettings.school)}</span><span>مديرية التربية: ${safe(schoolSettings.directorate)}</span><span>العام الدراسي: ${safe(schoolSettings.year)}</span></div>
+      <table><tbody>
+      <tr><th>المعلم</th><td>${safe(subjectTeachers[item.subject] || schoolSettings.teacher)}</td><th>المدير</th><td>${safe(schoolSettings.principal)}</td></tr>
+      <tr><th>الصف</th><td>${safe(item.grade)}</td><th>الشعبة</th><td>${safe(item.section)}</td></tr>
+      <tr><th>المادة</th><td>${safe(item.subject)}</td><th>الحصة</th><td>${safe(item.period || "")}</td></tr>
+      <tr><th>عنوان الدرس</th><td colspan="3">${safe(item.title)}</td></tr>
+      <tr><th>اليوم والتاريخ</th><td colspan="3">${safe(day)}${day && date ? " — " : ""}${safe(date)}</td></tr>
+      </tbody></table>
+      <div class="content-title">محتوى التحضير</div><div class="content">${richContent}</div>
+      <div class="foot">${item.bookTitle ? `المصدر: ${safe(item.bookTitle)}` : ""} ${item.pageStart ? `— الصفحات ${safe(item.pageStart)}–${safe(item.pageEnd)}` : ""}</div>
+      <div class="signatures"><div class="signature"><b>توقيع المعلم:</b>${schoolSettings.signature ? `<img alt="توقيع المعلم" src="${safe(schoolSettings.signature)}">` : " ........................................"}</div><div><b>توقيع المدير:</b> ........................................</div></div>
+      </article></body></html>`;
+  };
   const printPreparation = (item) =>
     printDocument(item.title, buildPreparationHtml(item));
   const aiRun = async () => {
@@ -1001,7 +1628,7 @@ ${extracted.text}
     ...calc(s),
   }));
   return (
-    <div className="app">
+    <div className={`app ${tab === "board" ? "board-mode" : ""}`}>
       <header className="top">
         <div className="brand">
           <img src={moallemIcon} />
@@ -1093,6 +1720,7 @@ ${extracted.text}
           </section>
         ) : (
           <>
+            {tab === "board" && <DrawingBoard strokes={boardStrokes} onChange={setBoardStrokes} onClose={() => setTab("home")} />}
             {tab === "home" && (
               <div className="stack">
                 <section className="hero">
@@ -1184,7 +1812,36 @@ ${extracted.text}
                     text="الأحد إلى الخميس"
                     onClick={() => setTab("schedule")}
                   />
+                  <Tile
+                    tone="violet"
+                    icon={<Library />}
+                    title="بنك المعلومات"
+                    text={`${knowledgeBank.length} سؤال ومذكرة وامتحان`}
+                    onClick={() => setTab("knowledge")}
+                  />
+                  <Tile
+                    tone="green"
+                    icon={<ClipboardList />}
+                    title="الواجبات والمذكرات"
+                    text={`${classHomework.length} بند في هذه الشعبة`}
+                    onClick={() => setTab("homework")}
+                  />
                 </div>
+                <section className="home-widget-card" dir="rtl">
+                  <div className="home-widget-top">
+                    <strong>دفتر المعلّم</strong>
+                    <span>✓ اليوم</span>
+                  </div>
+                  <h3>{dailyWidgetStatus.status}</h3>
+                  <p>{dailyWidgetStatus.dayLabel}</p>
+                  <div className="home-widget-footer">
+                    <small>ويدجت لمتابعة حصص اليوم من الشاشة الرئيسية</small>
+                    <button className="primary" type="button" onClick={requestHomeWidget}>
+                      <Plus size={16} /> إضافة ويدجت
+                    </button>
+                  </div>
+                  {widgetMessage && <p className="note" role="status">{widgetMessage}</p>}
+                </section>
                 <section className="ai-card">
                   <div>
                     <span className="ai-icon">
@@ -1203,112 +1860,174 @@ ${extracted.text}
                 </section>
               </div>
             )}
+            {tab === "homework" && (
+              <section className="panel homework-panel" dir="rtl">
+                <div className="panelhead">
+                  <div>
+                    <span className="eyebrow">متابعة الصف والشعبة</span>
+                    <h2>الواجبات والمذكرات</h2>
+                    <p>{grade} — الشعبة {section} · تُحفظ البيانات محليًا على الجهاز وتدخل ضمن النسخ الاحتياطية.</p>
+                  </div>
+                  <div className="actions">
+                    {classHomework.length > 0 && <button type="button" onClick={shareClassHomework}><Share2 size={16}/> مشاركة ملخص الشعبة</button>}
+                    {!homeworkFormOpen && <button className="primary" type="button" onClick={resetHomeworkDraft}><Plus size={16}/> إضافة واجب أو مذكرة</button>}
+                  </div>
+                </div>
+                {homeworkFormOpen && <div className="homework-form">
+                  <div className="homework-fields">
+                    <label>النوع<select value={homeworkDraft.type} onChange={e=>setHomeworkDraft(d=>({...d,type:e.target.value}))}>{["واجب","مذكرة","امتحان"].map(type=><option key={type}>{type}</option>)}</select></label>
+                    <label>المادة<select value={homeworkDraft.subject} onChange={e=>setHomeworkDraft(d=>({...d,subject:e.target.value}))}>{subjects.map(value=><option key={value}>{value}</option>)}</select></label>
+                    <label className="homework-title">العنوان<input value={homeworkDraft.title} onChange={e=>setHomeworkDraft(d=>({...d,title:e.target.value}))} placeholder="مثال: حل أسئلة الدرس"/></label>
+                    <label>موعد التسليم<input type="date" value={homeworkDraft.dueDate} onChange={e=>setHomeworkDraft(d=>({...d,dueDate:e.target.value}))}/></label>
+                    <label className="homework-details">ملاحظات<textarea value={homeworkDraft.details} onChange={e=>setHomeworkDraft(d=>({...d,details:e.target.value}))} placeholder="تفاصيل إضافية للأهل أو للطلاب"/></label>
+                  </div>
+                  <div className="actions"><button className="primary" type="button" onClick={saveHomeworkItem}><Save size={16}/> حفظ</button><button type="button" onClick={()=>{setHomeworkFormOpen(false);setEditingHomeworkId(null);}}>إلغاء</button></div>
+                </div>}
+                {classHomework.length === 0 ? <div className="empty-state">لا توجد واجبات أو مذكرات لهذه الشعبة بعد. أضف بندًا ليبدأ تتبّع التسليم.</div> : <div className="homework-list">
+                  {classHomework.map(item => {
+                    const counts = summarizeHomework(item, classStudents);
+                    return <article className="homework-card" key={item.id}>
+                      <div className="homework-card-head">
+                        <div><span className={`homework-badge ${item.type === "امتحان" ? "exam" : item.type === "مذكرة" ? "memo" : "assignment"}`}>{item.type || "واجب"}</span><h3>{item.title}</h3><p>{item.subject} · {grade} · الشعبة {section}{item.dueDate ? ` · التسليم ${item.dueDate}` : ""}</p>{item.details && <small>{item.details}</small>}</div>
+                        <div className="actions"><button type="button" onClick={()=>editHomeworkItem(item)}><Edit3 size={15}/> تعديل</button><button type="button" className="danger" aria-label="حذف" onClick={()=>deleteHomeworkItem(item.id)}><Trash2 size={15}/></button></div>
+                      </div>
+                      <div className="homework-totals"><span className="pending">لم يسلّم: {counts.pending}</span><span className="submitted">سلّم: {counts.submitted}</span><span className="absent">غائب: {counts.absent}</span></div>
+                      <div className="homework-roster">{classStudents.map(student => {
+                        const status = getHomeworkStatus(item, student.id);
+                        return <div className="homework-student" key={student.id}>
+                          <strong>{student.name}</strong>
+                          <div className="homework-status-actions">
+                            <button type="button" className={status === "pending" ? "active pending" : ""} aria-pressed={status === "pending"} onClick={()=>markHomeworkStatus(item.id,student.id,"pending")}>لم يسلّم</button>
+                            <button type="button" className={status === "submitted" ? "active submitted" : ""} aria-pressed={status === "submitted"} onClick={()=>markHomeworkStatus(item.id,student.id,"submitted")}>سلّم</button>
+                            <button type="button" className={status === "absent" ? "active absent" : ""} aria-pressed={status === "absent"} onClick={()=>markHomeworkStatus(item.id,student.id,"absent")}>غائب</button>
+                            <button type="button" className="parent-share" onClick={()=>shareHomeworkWithParent(student)}><Share2 size={14}/> رسالة للأهل</button>
+                          </div>
+                        </div>;
+                      })}</div>
+                    </article>;
+                  })}
+                </div>}
+              </section>
+            )}
+            {tab === "knowledge" && (
+              <section className="panel knowledge-panel" dir="rtl">
+                <div className="panelhead">
+                  <div><span className="eyebrow">مكتبة الصف والمادة</span><h2>بنك المعلومات</h2><p>احفظ الأسئلة والمذكرات والامتحانات وابحث فيها حسب العنوان أو المحتوى.</p></div>
+                  {!knowledgeFormOpen && <button className="primary" onClick={resetKnowledgeDraft}><Plus size={16}/> إضافة إلى البنك</button>}
+                </div>
+                {knowledgeFormOpen && <div className="knowledge-form">
+                  <div className="knowledge-fields">
+                    <label>نوع المحتوى<select value={knowledgeDraft.type} onChange={e=>setKnowledgeDraft(d=>({...d,type:e.target.value}))}>{["سؤال","مذكرة","امتحان"].map(type=><option key={type}>{type}</option>)}</select></label>
+                    <label>المادة<select value={knowledgeDraft.subject} onChange={e=>setKnowledgeDraft(d=>({...d,subject:e.target.value}))}>{subjects.map(value=><option key={value}>{value}</option>)}</select></label>
+                    <label>الصف<select value={knowledgeDraft.grade} onChange={e=>setKnowledgeDraft(d=>({...d,grade:e.target.value}))}>{grades.map(value=><option key={value}>{value}</option>)}</select></label>
+                    <label>الشعبة<select value={knowledgeDraft.section} onChange={e=>setKnowledgeDraft(d=>({...d,section:e.target.value}))}>{sections.map(value=><option key={value}>{value}</option>)}</select></label>
+                    <label className="knowledge-title">العنوان<input value={knowledgeDraft.title} onChange={e=>setKnowledgeDraft(d=>({...d,title:e.target.value}))} placeholder="مثال: أسئلة الوحدة الأولى"/></label>
+                    <label className="knowledge-content">المحتوى<textarea value={knowledgeDraft.content} onChange={e=>setKnowledgeDraft(d=>({...d,content:e.target.value}))} placeholder="اكتب السؤال أو المذكرة أو محتوى الامتحان..."/></label>
+                  </div>
+                  <div className="actions"><button className="primary" onClick={saveKnowledgeItem}><Save size={16}/> حفظ</button><button onClick={()=>{setKnowledgeFormOpen(false);setEditingKnowledgeId(null);}}>إلغاء</button></div>
+                </div>}
+                <div className="knowledge-filters">
+                  <label className="search"><Search size={17}/><input value={knowledgeQuery} onChange={e=>setKnowledgeQuery(e.target.value)} placeholder="ابحث في الأسئلة والمذكرات والامتحانات..."/></label>
+                  <select aria-label="تصفية نوع بنك المعلومات" value={knowledgeTypeFilter} onChange={e=>setKnowledgeTypeFilter(e.target.value)}>{["الكل","سؤال","مذكرة","امتحان"].map(type=><option key={type}>{type}</option>)}</select>
+                </div>
+                {visibleKnowledgeItems.length === 0 ? <div className="empty-state">لا توجد عناصر مطابقة. أضف سؤالاً أو مذكرة أو امتحاناً ليظهر هنا.</div> : <div className="knowledge-list">{visibleKnowledgeItems.map(item=><article className="knowledge-item" key={item.id}>
+                  <div className="knowledge-item-head"><div><span className={`knowledge-badge ${item.type === "امتحان" ? "exam" : item.type === "مذكرة" ? "note" : "question"}`}>{item.type || "سؤال"}</span><h3>{item.title}</h3><small>{item.subject || "—"} · {item.grade || "—"} · الشعبة {item.section || "—"}</small></div><div className="actions"><button onClick={()=>editKnowledgeItem(item)}><Edit3 size={15}/> تعديل</button><button className="danger" aria-label="حذف العنصر" onClick={()=>deleteKnowledgeItem(item.id)}><Trash2 size={15}/></button></div></div>
+                  <p className="knowledge-item-content">{item.content}</p>
+                </article>)}</div>}
+              </section>
+            )}
             {tab === "schedule" && (
               <section className="panel weekly-panel">
                 <div className="panelhead">
                   <div>
-                    <span className="eyebrow">البرنامج الأسبوعي</span>
-                    <h2>حصصي من الأحد إلى الخميس</h2>
-                    <p>أضف وعدّل واحذف الحصص، والحفظ تلقائي على الجهاز.</p>
+                    <span className="eyebrow">دفتر التحضير الرسمي 2026–2027</span>
+                    <h2>البرنامج الأسبوعي</h2>
+                    <p>خمسة أيام وسبع حصص لكل يوم. التعديل يُحفظ تلقائياً على جهازك.</p>
                   </div>
+                  <button className="primary" onClick={printWeeklySchedule}><PrinterIcon size={16} /> طباعة / PDF</button>
                 </div>
-                <div className="weekly-days">
-                  {WEEK_DAYS.map((day) => (
-                    <article className="weekly-day" key={day}>
-                      <div className="weekly-day-head">
-                        <div>
-                          <strong>{day}</strong>
-                          <span>{(weeklySchedule[day] || []).length} حصة</span>
-                        </div>
-                        <button
-                          className="primary"
-                          onClick={() => addWeeklyPeriod(day)}
-                        >
-                          <Plus size={16} /> إضافة حصة
-                        </button>
-                      </div>
-                      <div className="weekly-periods">
-                        {(weeklySchedule[day] || []).length ? (
-                          (weeklySchedule[day] || []).map((period, i) => (
-                            <div className="weekly-period" key={period.id}>
-                              <span className="period-num">{i + 1}</span>
-                              <select
-                                value={period.grade}
-                                onChange={(e) =>
-                                  updateWeeklyPeriod(day, period.id, {
-                                    grade: e.target.value,
-                                  })
-                                }
-                              >
-                                {grades.map((g) => (
-                                  <option key={g}>{g}</option>
-                                ))}
-                              </select>
-                              <select
-                                value={period.section}
-                                onChange={(e) =>
-                                  updateWeeklyPeriod(day, period.id, {
-                                    section: e.target.value,
-                                  })
-                                }
-                              >
-                                {sections.map((v) => (
-                                  <option key={v}>{v}</option>
-                                ))}
-                              </select>
-                              <select
-                                value={period.subject}
-                                onChange={(e) =>
-                                  updateWeeklyPeriod(day, period.id, {
-                                    subject: e.target.value,
-                                  })
-                                }
-                              >
-                                {(GENERAL_SCIENCE_GRADES.includes(period.grade)
-                                  ? subjects.filter(
-                                      (v) =>
-                                        ![
-                                          "الفيزياء",
-                                          "الكيمياء",
-                                          "علم الأحياء",
-                                          "علم الأرض",
-                                        ].includes(v),
-                                    )
-                                  : subjects
-                                ).map((v) => (
-                                  <option key={v}>{v}</option>
-                                ))}
-                              </select>
-                              <input
-                                type="time"
-                                value={period.time || ""}
-                                onChange={(e) =>
-                                  updateWeeklyPeriod(day, period.id, {
-                                    time: e.target.value,
-                                  })
-                                }
-                                aria-label={`وقت الحصة ${i + 1}`}
-                              />
-                              <button
-                                className="danger"
-                                onClick={() =>
-                                  removeWeeklyPeriod(day, period.id)
-                                }
-                                aria-label="حذف الحصة"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="weekly-empty">لا توجد حصص بعد.</div>
-                        )}
-                      </div>
-                    </article>
-                  ))}
+                <label className="schedule-date-label">يعمل بهذا البرنامج اعتباراً من:
+                  <input type="date" value={scheduleEffectiveDate} onChange={(e) => setScheduleEffectiveDate(e.target.value)} />
+                </label>
+                <div className="official-schedule-scroll">
+                  <table className="official-schedule" dir="rtl">
+                    <thead><tr><th>اليوم</th>{Array.from({length:7},(_,i)=><th key={i}>الدرس {i+1}</th>)}</tr></thead>
+                    <tbody>{WEEK_DAYS.map(day=><tr key={day}>
+                      <th>{day}</th>
+                      {Array.from({length:7},(_,i)=><td key={i}><textarea
+                        aria-label={`${day} - الدرس ${i+1}`}
+                        value={scheduleCellText(day,i)}
+                        onChange={e=>setScheduleCell(day,i,e.target.value)}
+                        rows={3}
+                      /></td>)}
+                    </tr>)}</tbody>
+                  </table>
                 </div>
+                <p className="note">الخانات القديمة تظهر تلقائياً؛ تعديل أي خانة يحفظ نصها الجديد دون حذف بيانات بقية الحصص.</p>
+                <div className="official-schedule-footer"><span>ملاحظات: ................................</span><span>اسم المدرس وتوقيعه: ................................</span></div>
               </section>
             )}
+            {tab === "student-profile" && profileStudent && studentProfile && (
+              <section className="panel student-profile-panel" dir="rtl">
+                <div className="student-id-card">
+                  <div className="student-photo-frame">
+                    {profileStudent.photo
+                      ? <img src={profileStudent.photo} alt={`صورة ${profileStudent.name}`} className="student-photo" />
+                      : <div className="student-photo-placeholder"><Users size={30} /><span>لا توجد صورة</span></div>}
+                  </div>
+                  <div className="student-id-details">
+                    <span className="eyebrow">بطاقة الطالب · متابعة خاصة</span>
+                    <h2>{profileStudent.name}</h2>
+                    <p>{profileStudent.grade} — الشعبة {profileStudent.section}</p>
+                    <small>رقم الطالب: {profileStudent.id}</small>
+                  </div>
+                  <input ref={studentPhotoInputRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={saveStudentPhoto} />
+                  <div className="actions student-id-actions">
+                    <button type="button" onClick={() => studentPhotoInputRef.current?.click()}><Camera size={16}/>{profileStudent.photo ? "تغيير الصورة" : "إضافة صورة"}</button>
+                    {profileStudent.photo && <button type="button" className="danger" onClick={removeStudentPhoto}>حذف الصورة</button>}
+                    <button type="button" onClick={printStudentIdentityCard}><PrinterIcon size={16}/> طباعة البطاقة</button>
+                  </div>
+                </div>
+                {studentPhotoMessage && <p className="note" role="status">{studentPhotoMessage}</p>}
+                <div className="panelhead">
+                  <div>
+                    <span className="eyebrow">ملف المتابعة</span>
+                    <h2>{profileStudent.name}</h2>
+                    <p>{profileStudent.grade} — الشعبة {profileStudent.section}</p>
+                  </div>
+                  <div className="actions">
+                    <button type="button" onClick={() => setTab("students")}><ChevronRight size={16}/> العودة للشعبة</button>
+                    {studentProfile.homework.some(item => item.status !== "submitted") && <button type="button" onClick={shareStudentProfileHomework}><Share2 size={16}/> رسالة لولي الأمر</button>}
+                    <button type="button" className="primary" onClick={printStudentProfile}><PrinterIcon size={16}/> طباعة / PDF</button>
+                  </div>
+                </div>
+                <div className="student-profile-summary">
+                  <article><small>الحضور</small><strong>{studentProfile.attendanceSummary.present}</strong><span>يوم</span></article>
+                  <article><small>الغياب</small><strong className="absent-text">{studentProfile.attendanceSummary.absent}</strong><span>يوم</span></article>
+                  <article><small>التأخر</small><strong>{studentProfile.attendanceSummary.late}</strong><span>يوم</span></article>
+                  <article><small>بنود غير مسلّمة</small><strong className="pending-text">{studentProfile.homework.filter(item => item.status !== "submitted").length}</strong><span>بند</span></article>
+                </div>
+                {studentProfile.legacyStatus && <p className="note">حالة حضور قديمة محفوظة بلا تاريخ: {studentProfile.legacyStatus === "absent" ? "غائب" : studentProfile.legacyStatus === "late" ? "متأخر" : "حاضر"}</p>}
+                <section className="profile-block">
+                  <h3>العلامات والمحصلات</h3>
+                  {studentProfile.grades.length ? <div className="profile-table-scroll"><table className="student-profile-table"><thead><tr><th>المادة</th><th>المحصلة</th><th>الدرجة العظمى</th><th>الحالة</th></tr></thead><tbody>{studentProfile.grades.map(item=><tr key={item.subject}><td>{item.subject}</td><td>{item.value}</td><td>{item.maximum || "—"}</td><td>{item.pendingExam ? "بانتظار الامتحان" : "—"}</td></tr>)}</tbody></table></div> : <p className="empty-state">لا توجد علامات محفوظة لهذا الطالب بعد.</p>}
+                </section>
+                <section className="profile-block">
+                  <h3>سجل الحضور والغياب</h3>
+                  {studentProfile.attendance.length ? <div className="profile-table-scroll"><table className="student-profile-table"><thead><tr><th>التاريخ</th><th>الحالة</th><th>ملاحظة</th></tr></thead><tbody>{studentProfile.attendance.map(item=><tr key={item.date}><td>{item.date}</td><td><span className={`profile-attendance-status ${item.status}`}>{item.status === "present" ? "م · حاضر" : item.status === "absent" ? "غا · غائب" : "متأخر"}</span></td><td>{item.note || "—"}</td></tr>)}</tbody></table></div> : <p className="empty-state">لا توجد أيام حضور مؤرخة لهذا الطالب.</p>}
+                </section>
+                <section className="profile-block">
+                  <h3>الواجبات والمذكرات</h3>
+                  {studentProfile.homework.length ? <div className="profile-table-scroll"><table className="student-profile-table"><thead><tr><th>النوع</th><th>العنوان</th><th>المادة</th><th>التسليم</th><th>الموعد</th></tr></thead><tbody>{studentProfile.homework.map(item=><tr key={item.id}><td>{item.type || "واجب"}</td><td>{item.title}</td><td>{item.subject || "—"}</td><td><span className={`profile-homework-status ${item.status}`}>{item.status === "submitted" ? "مُسلّم" : item.status === "absent" ? "غائب ويحتاج استدراك" : "لم يسلّم"}</span></td><td>{item.dueDate || "—"}</td></tr>)}</tbody></table></div> : <p className="empty-state">لا توجد واجبات أو مذكرات مسجلة.</p>}
+                </section>
+                <section className="profile-block">
+                  <h3>ملاحظات المعلم</h3>
+                  <div className="student-note-form"><textarea value={studentNoteDraft} onChange={event=>setStudentNoteDraft(event.target.value)} placeholder="اكتب ملاحظة متابعة لهذا الطالب..." rows={3}/><button type="button" className="primary" onClick={saveStudentNote} disabled={!studentNoteDraft.trim()}><Save size={16}/> حفظ الملاحظة</button></div>
+                  {studentProfile.notes.length ? <div className="student-note-list">{studentProfile.notes.map(note=><article key={note.id}><div><small>{String(note.createdAt || "").slice(0,10)}</small><p>{note.text}</p></div><button type="button" className="danger" title="حذف الملاحظة" onClick={()=>deleteStudentNote(note.id)}><Trash2 size={15}/></button></article>)}</div> : <p className="empty-state">لا توجد ملاحظات مسجلة.</p>}
+                </section>
+              </section>
+            )}
+            {tab === "student-profile" && !profileStudent && <section className="panel"><div className="empty-state">تعذر العثور على هذا الطالب. <button type="button" onClick={()=>setTab("students")}>العودة إلى الطلاب</button></div></section>}
             {tab === "students" && (
               <section className="panel">
                 <div className="panelhead">
@@ -1319,8 +2038,13 @@ ${extracted.text}
                     </h2>
                   </div>
                   <div className="actions">
+                    <button type="button" onClick={shareClassRoster}><Share2 size={17} /> مشاركة الشعبة</button>
+                    <button type="button" onClick={copyClassRoster}><Copy size={17} /> نسخ القائمة</button>
                     <button onClick={sortArabic}>
                       <ArrowUpDown size={17} /> ترتيب أبجدي
+                    </button>
+                    <button type="button" onClick={() => { setBulkNamesOpen((open) => !open); setBulkNamesMessage(""); }}>
+                      <Upload size={17} /> إضافة جماعية
                     </button>
                     <button className="primary" onClick={addStudent}>
                       <UserPlus size={17} /> إضافة طالب
@@ -1335,6 +2059,39 @@ ${extracted.text}
                     placeholder="ابحث عن طالب..."
                   />
                 </div>
+                {bulkNamesOpen && (
+                  <div className="bulk-students-box">
+                    <div className="bulk-students-head">
+                      <div>
+                        <strong>إضافة مجموعة أسماء</strong>
+                        <small>ستُضاف الأسماء إلى {grade} — الشعبة {section}</small>
+                      </div>
+                      <label className="bulk-file-button">
+                        <FileText size={16} /> تحميل CSV أو TXT
+                        <input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(event) => { loadStudentNamesFile(event.target.files?.[0]); event.target.value = ""; }} />
+                      </label>
+                    </div>
+                    <textarea
+                      className="bulk-students-input"
+                      value={bulkNamesText}
+                      onChange={(event) => { setBulkNamesText(event.target.value); setBulkNamesMessage(""); }}
+                      placeholder="الصق الأسماء هنا، اسمًا في كل سطر. يمكنك نسخ عمود الأسماء مباشرة من Excel أو Google Sheets."
+                      rows={5}
+                      dir="auto"
+                    />
+                    <div className="bulk-students-meta">
+                      <span>الأسماء المكتشفة: <strong>{bulkNameList.length}</strong></span>
+                      {bulkDuplicateCount > 0 && <span className="duplicate-hint">أسماء متكررة: {bulkDuplicateCount} — ستُضاف كطلاب منفصلين بعد التأكيد.</span>}
+                    </div>
+                    {bulkNamesMessage && <p className="bulk-message" role="status">{bulkNamesMessage}</p>}
+                    <div className="actions">
+                      <button className="primary" type="button" onClick={addStudentsFromList} disabled={!bulkNameList.length}>
+                        إضافة {bulkNameList.length} اسمًا
+                      </button>
+                      <button type="button" onClick={() => { setBulkNamesOpen(false); setBulkNamesMessage(""); }}>إغلاق</button>
+                    </div>
+                  </div>
+                )}
                 <div className="studentlist">
                   {visibleStudents.map((s, i) => (
                     <div className="studentrow" key={s.id}>
@@ -1375,6 +2132,17 @@ ${extracted.text}
                           <option key={g}>{g}</option>
                         ))}
                       </select>
+                      <button
+                        type="button"
+                        className="student-profile-button"
+                        title={`ملف متابعة ${s.name}`}
+                        onClick={() => openStudentProfile(s)}
+                      ><FileText size={16} /><span>ملف</span></button>
+                      <button
+                        type="button"
+                        title={`مشاركة ${s.name}`}
+                        onClick={() => shareText(`${i + 1}. ${s.name}`, `مشاركة اسم طالب`)}
+                      ><Share2 size={16} /></button>
                       <button
                         className="danger"
                         onClick={() => deleteStudent(s.id)}
@@ -1418,6 +2186,12 @@ ${extracted.text}
                 </div>
                 {editMode && (
                   <div className="column-tools">
+                    {officialGradeMaximum(grade, subject) != null && (
+                      <button type="button" onClick={applyOfficialDistribution}>
+                        اعتماد توزيع 2025–2026 ({officialGradeMaximum(grade, subject)})
+                      </button>
+                    )}
+                    {split200 && !finalExamColumn && <button type="button" onClick={ensureFinalExam}>إضافة الامتحان الأخير وحساب المعدّل</button>}
                     <button onClick={addColumn}>
                       <Plus size={16} /> إضافة عمود
                     </button>
@@ -1461,13 +2235,22 @@ ${extracted.text}
                             )}
                           </th>
                         ))}
-                        <th>المجموع</th>
+                        {split200 && finalExamColumn && <th>درجة الأعمال /{officialMax}</th>}
+                        <th>{split200 && finalExamColumn ? "العلامة النهائية /{officialMax}" : "المجموع"}</th>
                         <th>النسبة</th>
+                        {showSciencePairSummary && <>
+                          <th>محصلة العلوم</th>
+                          <th>محصلة الفيزياء والكيمياء</th>
+                          <th>مجموع المحصلتين</th>
+                        </>}
                       </tr>
                     </thead>
                     <tbody>
                       {classStudents.map((s, i) => {
                         const c = calc(s);
+                        const pair = showSciencePairSummary
+                          ? calculateSciencePairSummary(gradebooks, grade, section, s.id, officialGradeMaximum)
+                          : null;
                         return (
                           <tr key={s.id}>
                             <td>{i + 1}</td>
@@ -1485,14 +2268,20 @@ ${extracted.text}
                                 />
                               </td>
                             ))}
+                            {c.split && <td><b>{c.works}/{officialMax}</b></td>}
                             <td>
                               <b>
-                                {c.got}/{c.max}
+                                {c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`}
                               </b>
                             </td>
                             <td>
                               <b>{c.pct}%</b>
                             </td>
+                            {pair && <>
+                              <td><b>{pair.science ?? "—"}</b></td>
+                              <td><b>{pair.physicsChemistry ?? "—"}</b></td>
+                              <td><b>{pair.total ?? "—"}</b></td>
+                            </>}
                           </tr>
                         );
                       })}
@@ -1511,29 +2300,43 @@ ${extracted.text}
                     </h2>
                   </div>
                 </div>
+                <div className="attendance-tools" dir="rtl">
+                  <label>تاريخ السجل <input type="date" value={attendanceDate} onChange={(event) => setAttendanceDate(event.target.value)} /></label>
+                  <div className="actions">
+                    <button type="button" onClick={() => setAttendanceDate(localDateKey())}>اليوم</button>
+                    <button type="button" onClick={shareClassRoster}><Share2 size={16} /> مشاركة الشعبة</button>
+                  </div>
+                  <p className="note">السجلات الجديدة تُحفظ بحسب الصف والشعبة والتاريخ، وبسجل واحد لكل طالب في اليوم.</p>
+                  {attendanceMessage && <p className="note" role="status">{attendanceMessage}</p>}
+                  <div className="attendance-days"><strong>الأيام المسجلة:</strong>{Object.keys(attendanceHistory).filter((key) => key.startsWith(`${grade}|${section}|`)).map((key) => key.slice(`${grade}|${section}|`.length)).sort().map((date) => <button type="button" className={date === attendanceDate ? "active" : ""} key={date} onClick={() => setAttendanceDate(date)}>{date}</button>)}{!Object.keys(attendanceHistory).some((key) => key.startsWith(`${grade}|${section}|`)) && <span>لا توجد سجلات مؤرخة بعد.</span>}</div>
+                </div>
                 <div className="studentlist">
                   {classStudents.map((s, i) => {
-                    const k = `${grade}|${section}|${s.id}`,
-                      st = attendance[k] || "present";
+                    const k = attendanceDateKey(grade, section, attendanceDate);
+                    const record = attendanceHistory[k]?.[s.id] || {};
+                    const st = record.status || "";
+                    const summary = summarizeAttendance(attendanceHistory, grade, section, s.id);
+                    const legacyStatus = attendance[`${grade}|${section}|${s.id}`];
                     return (
-                      <div className="attrow" key={s.id}>
+                      <div className="attrow attendance-row" key={s.id}>
                         <span className="num">{i + 1}</span>
-                        <strong>{s.name}</strong>
+                        <div className="attendance-student"><strong>{s.name}</strong><small>حضور {summary.present} يوم · غياب {summary.absent} يوم</small>{!summary.total && legacyStatus && <small>حالة قديمة محفوظة بلا تاريخ: {legacyStatus === "absent" ? "غائب" : legacyStatus === "late" ? "متأخر" : "حاضر"}</small>}</div>
                         <div className="seg">
                           {["present", "absent", "late"].map((v) => (
                             <button
                               key={v}
-                              className={st === v ? "active" : ""}
+                              className={`${st === v ? "active" : ""} ${v === "absent" ? "absent" : v === "present" ? "present" : ""}`}
                               onClick={() => setAtt(s.id, v)}
                             >
                               {v === "present"
-                                ? "حاضر"
+                                ? "م · حاضر"
                                 : v === "absent"
-                                  ? "غائب"
+                                  ? "غا · غائب"
                                   : "متأخر"}
                             </button>
                           ))}
                         </div>
+                        <input className={`attendance-note ${/غائب/.test(record.note || "") ? "absent" : /حاضر/.test(record.note || "") ? "present" : ""}`} dir="auto" placeholder="ملاحظة" value={record.note || ""} onChange={(event) => setAtt(s.id, st, event.target.value)} />
                       </div>
                     );
                   })}
@@ -2007,11 +2810,10 @@ ${extracted.text}
                 )}
                 {aiResult && (
                   <>
-                    <textarea
-                      className="airesult editable-result"
-                      value={aiResult}
-                      onChange={(e) => updateCurrentPreparation(e.target.value)}
-                    />
+                    <div className="prep-page-toggle"><button type="button" onClick={() => setFullPagePreparation(value => !value)}>{fullPagePreparation ? "تصغير صفحة التحضير" : "عرض التحضير بصفحة كاملة"}</button><span>الألوان محفوظة كما تظهر في الطباعة</span></div>
+                    <div className={fullPagePreparation ? "prep-fullpage" : "prep-standard"}>
+                      <PreparationEditor key={String(editingPreparationId || "draft")} text={aiResult} initialHtml={aiRichContent || autoColorHtml(aiResult)} onChange={updateCurrentPreparation}/>
+                    </div>
                     <div className="actions prep-actions">
                       <button
                         className="primary"
@@ -2034,6 +2836,7 @@ ${extracted.text}
                             pageStart: bookStartPage,
                             pageEnd: bookEndPage,
                             content: aiResult,
+                            richContent: aiRichContent || autoColorHtml(aiResult),
                           })
                         }
                       >
@@ -2085,37 +2888,28 @@ ${extracted.text}
               </section>
             )}
             {tab === "settings" && (
-              <section className="panel">
-                <div className="panelhead">
-                  <div>
-                    <span className="eyebrow">التخصيص</span>
-                    <h2>كل بند قابل للتعديل</h2>
-                  </div>
-                </div>
-                <Config
-                  title="الصفوف"
-                  items={grades}
-                  kind="الصف"
-                  add={() => addItem("الصف")}
-                  rename={renameItem}
-                  remove={removeItem}
-                />
-                <Config
-                  title="الشُعب"
-                  items={sections}
-                  kind="الشعبة"
-                  add={() => addItem("الشعبة")}
-                  rename={renameItem}
-                  remove={removeItem}
-                />
-                <Config
-                  title="المواد"
-                  items={subjects}
-                  kind="المادة"
-                  add={() => addItem("المادة")}
-                  rename={renameItem}
-                  remove={removeItem}
-                />
+              <section className="panel settings-panel" dir="rtl">
+                <div className="panelhead"><div><span className="eyebrow">التخصيص</span><h2>الإعدادات</h2><p>بياناتك محفوظة على هذا الجهاز تلقائياً.</p></div></div>
+                <details className="settings-section" open><summary>١. بيانات المعلم</summary><label className="setting-field">اسم المعلم<input value={schoolSettings.teacher || ""} onChange={e=>setSchoolSettings(v=>({...v,teacher:e.target.value}))}/></label><label className="setting-field">اسم المدير<input value={schoolSettings.principal || ""} onChange={e=>setSchoolSettings(v=>({...v,principal:e.target.value}))}/></label></details>
+                <details className="settings-section"><summary>٢. بيانات المدرسة</summary><label className="setting-field">اسم المدرسة<input value={schoolSettings.school || ""} onChange={e=>setSchoolSettings(v=>({...v,school:e.target.value}))}/></label><label className="setting-field">مديرية التربية<input value={schoolSettings.directorate || ""} onChange={e=>setSchoolSettings(v=>({...v,directorate:e.target.value}))}/></label><label className="setting-field">العام الدراسي<input value={schoolSettings.year || ""} onChange={e=>setSchoolSettings(v=>({...v,year:e.target.value}))}/></label></details>
+                <details className="settings-section"><summary>٣. المواد الدراسية والمعلمون</summary><p className="note">لكل مادة دفتر علامات وتحاضير مستقلان. عند إضافة هذه الخيارات تبقى المواد والسجلات القديمة كما هي.</p><Config title="المواد" items={subjects} kind="المادة" add={() => addItem("المادة")} rename={renameItem} remove={removeItem}/><div className="subject-teachers"><h4>معلم المادة</h4>{subjects.map(name=><label className="setting-field" key={name}>{name}<input placeholder={schoolSettings.teacher || "اسم المعلم"} value={subjectTeachers[name] || ""} onChange={e=>setSubjectTeachers(v=>({...v,[name]:e.target.value}))}/></label>)}</div></details>
+                <details className="settings-section"><summary>٤. الجدول المدرسي وأوقات الحصص</summary><p className="note">تُضبط هنا أوقات الحصص السبع. تفاصيل توزيع الصفوف والأيام تبقى في صفحة الجدول.</p>{periodSettings.map((times,index)=><div className="period-row" key={index}><strong>الحصة {index+1}</strong><label>من<input type="time" value={times[0]} onChange={e=>setPeriodSettings(p=>p.map((t,i)=>i===index?[e.target.value,t[1]]:t))}/></label><label>إلى<input type="time" value={times[1]} onChange={e=>setPeriodSettings(p=>p.map((t,i)=>i===index?[t[0],e.target.value]:t))}/></label></div>)}</details>
+                <details className="settings-section"><summary>٥. التنبيهات الصوتية</summary>{[["enabled","تفعيل التنبيهات"],["start","تنبيه بداية الحصة"],["end","تنبيه نهاية الحصة"]].map(([key,label])=><label className="setting-check" key={key}><input type="checkbox" checked={Boolean(soundSettings[key])} onChange={e=>setSoundSettings(v=>({...v,[key]:e.target.checked}))}/>{label}</label>)}<button type="button" className="primary" onClick={scheduleClassNotifications}><Bell size={16}/> جدولة تنبيهات الأسبوع</button>{notificationMessage && <p className="note" role="status">{notificationMessage}</p>}<p className="note">تُجدول تنبيهات محلية في Android. قد يؤخر وضع توفير الطاقة الإشعار، وقد يتطلب Android 12+ السماح بالتنبيهات الدقيقة.</p></details>
+                <details className="settings-section"><summary>٦. إعدادات دفتر التحضير والطباعة</summary><p className="note">الألوان الافتراضية: الأزرق للعناوين، الأحمر للملاحظات والتنبيهات، الأخضر للأهداف والأنشطة، والأسود للنص الأساسي. يمكن تغيير لون نص محدد من شريط المحرر وإعادة اللون التلقائي.</p><p className="note">لم نعثر في ملفات المشروع أو البحث بالمصادر الرسمية على نموذج تحضير وزاري منشور لعام 2026–2027. لذلك أبقينا الطباعة قالبًا عامًا قابلًا للتخصيص، ولم نسمِّه نموذجًا رسميًا.</p></details>
+                <details className="settings-section"><summary>٧. توقيع المعلم</summary><SignaturePad value={schoolSettings.signature || ""} onChange={signature=>setSchoolSettings(v=>({...v,signature}))}/><p className="note">ارسم توقيعك بالإصبع. يظهر في طباعة التحضير العام.</p></details>
+                <details className="settings-section"><summary>٨. النسخ الاحتياطي والاستعادة</summary><p className="note">تتضمن النسخة بيانات الطلاب والعلامات والتحاضير والإعدادات والتوقيع وملفات كتب PDF المخزنة محلياً.</p><div className="settings-actions"><button type="button" onClick={exportSettingsBackup}>تنزيل نسخة احتياطية</button><label className="restore-file">استعادة نسخة احتياطية<input type="file" accept=".json,application/json" onChange={e=>importSettingsBackup(e.target.files?.[0])}/></label></div><p className="note">تطلب الاستعادة تأكيداً قبل استبدال البيانات الموجودة.</p></details>
+                <details className="settings-section"><summary>٩. فحص نسخة دفتر التحضير — دون استيراد</summary>
+                  <p className="note">اختر نسخة دفتر التحضير العامة بصيغة JSON. يعرض الفحص أعداد السجلات فقط، ولا يحفظ الملف أو ينقل بياناته أو يغيّر أي شيء في معلّم.</p>
+                  <label className="restore-file">اختيار نسخة للفحص فقط<input type="file" accept=".json,application/json" onChange={e=>{inspectLegacyBackupFile(e.target.files?.[0]);e.target.value="";}}/></label>
+                  {legacyBackupError && <p role="alert" className="note">{legacyBackupError}</p>}
+                  {legacyBackupReport && <div role="status" className="note">
+                    <p>تم فحص نسخة دفتر التحضير (الإصدار {legacyBackupReport.version}).</p>
+                    <p><strong>مقارنة أولية قبل النقل:</strong> في معلّم حاليًا {savedPreparations.length} تحضير محفوظ، و{students.length} طالب. الأعداد لا تكفي لاكتشاف التكرارات؛ يجب فحص المعرفات قبل أي دمج.</p>
+                    <ul>{legacyBackupReport.sections.map(section=><li key={section.key}>{section.key}: {section.count} سجل/عنصر</li>)}</ul>
+                    <ul>{legacyBackupReport.warnings.map(warning=><li key={warning}>{warning}</li>)}</ul>
+                  </div>}
+                </details>
+                <details className="settings-section"><summary>إدارة الصفوف والشُعب</summary><Config title="الصفوف" items={grades} kind="الصف" add={() => addItem("الصف")} rename={renameItem} remove={removeItem}/><Config title="الشُعب" items={sections} kind="الشعبة" add={() => addItem("الشعبة")} rename={renameItem} remove={removeItem}/></details>
               </section>
             )}
           </>
@@ -2152,16 +2946,131 @@ ${extracted.text}
             <span>الذكاء</span>
           </button>
           <button
+            className={tab === "knowledge" ? "active" : ""}
+            onClick={() => setTab("knowledge")}
+          >
+            <Library />
+            <span>البنك</span>
+          </button>
+          <button
             className={tab === "settings" ? "active" : ""}
             onClick={() => setTab("settings")}
           >
             <Settings />
-            <span>تعديل</span>
+            <span>الإعدادات</span>
           </button>
         </nav>
       )}
     </div>
   );
+}
+function SignaturePad({ value, onChange }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ratio = window.devicePixelRatio || 1;
+    const width = Math.max(280, canvas.clientWidth || 320);
+    const height = 150;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    const context = canvas.getContext("2d");
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    if (value) {
+      const image = new Image();
+      image.onload = () => context.drawImage(image, 0, 0, width, height);
+      image.src = value;
+    }
+  }, [value]);
+  const point = event => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {x: event.clientX - rect.left, y: event.clientY - rect.top};
+  };
+  const begin = event => {
+    const canvas = event.currentTarget;
+    canvas.setPointerCapture(event.pointerId);
+    drawing.current = true;
+    const context = canvas.getContext("2d");
+    const p = point(event);
+    context.beginPath(); context.moveTo(p.x, p.y); context.lineWidth = 2.5; context.lineCap = "round"; context.lineJoin = "round"; context.strokeStyle = "#173653";
+  };
+  const move = event => {
+    if (!drawing.current) return;
+    const p = point(event); const context = event.currentTarget.getContext("2d");
+    context.lineTo(p.x, p.y); context.stroke();
+  };
+  const finish = event => {
+    if (!drawing.current) return;
+    drawing.current = false;
+    onChange(event.currentTarget.toDataURL("image/png"));
+  };
+  const clear = () => { const canvas = canvasRef.current; const context = canvas.getContext("2d"); context.clearRect(0, 0, canvas.clientWidth, 150); onChange(""); };
+  return <div className="signature-pad"><canvas ref={canvasRef} aria-label="ارسم توقيع المعلم بالإصبع" onPointerDown={begin} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish}/><div><span>ارسم التوقيع داخل الإطار</span><button type="button" onClick={clear}>مسح التوقيع</button></div></div>;
+}
+function PreparationEditor({ text, initialHtml, onChange }) {
+  const editorRef = useRef(null);
+  useEffect(() => { if(editorRef.current) editorRef.current.innerHTML = sanitizeRichHtml(initialHtml || autoColorHtml(text)); }, []);
+  const notify = () => {
+    const editor=editorRef.current;
+    if(!editor)return;
+    const html=sanitizeRichHtml(editor.innerHTML);
+    const plain=(editor.innerText || editor.textContent || "").replace(/\u00a0/g," ").replace(/\n{3,}/g,"\n\n").trim();
+    onChange(plain,html);
+  };
+  const paint = (color) => {
+    const editor=editorRef.current;
+    if(!editor)return;
+    editor.focus();
+    const selection=window.getSelection();
+    if(!selection || selection.isCollapsed || !editor.contains(selection.anchorNode))return;
+    document.execCommand("styleWithCSS",false,true);
+    document.execCommand("foreColor",false,color);
+    notify();
+  };
+  const automatic = () => {
+    const editor=editorRef.current;
+    const value=(editor?.innerText || editor?.textContent || text).replace(/\u00a0/g," ");
+    if(editor)editor.innerHTML=autoColorHtml(value);
+    notify();
+  };
+  return <div className="preparation-editor"><div className="prep-color-tools"><strong>لون النص المحدد:</strong><button type="button" className="prep-blue" onMouseDown={e=>e.preventDefault()} onClick={()=>paint("#1769aa")}>أزرق</button><button type="button" className="prep-red" onMouseDown={e=>e.preventDefault()} onClick={()=>paint("#d32f2f")}>أحمر</button><button type="button" className="prep-green" onMouseDown={e=>e.preventDefault()} onClick={()=>paint("#16834a")}>أخضر</button><button type="button" className="prep-black" onMouseDown={e=>e.preventDefault()} onClick={()=>paint("#111111")}>أسود</button><button type="button" onClick={automatic}>إعادة اللون التلقائي</button></div><div ref={editorRef} className="airesult editable-result rich-editor" contentEditable suppressContentEditableWarning dir="rtl" role="textbox" aria-label="نص التحضير القابل للتحرير" onInput={notify}/><p className="note">حدّد الكلمات أولاً ثم اختر لونها. تحفظ الألوان مع التحضير وتظهر في الطباعة وملف PDF.</p></div>;
+}
+function DrawingBoard({ strokes, onChange, onClose }) {
+  const canvasRef = useRef(null);
+  const activeStroke = useRef(false);
+  const [color, setColor] = useState("#111111");
+  const [redoStack, setRedoStack] = useState([]);
+  useEffect(() => {
+    const draw = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+      canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+      const context = canvas.getContext("2d");
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, rect.width, rect.height);
+      for (const stroke of strokes) {
+        if (!stroke.points?.length) continue;
+        context.beginPath(); context.strokeStyle = stroke.color; context.lineWidth = stroke.width || 3;
+        context.lineCap = "round"; context.lineJoin = "round";
+        stroke.points.forEach(([x, y], index) => { const px = x * rect.width, py = y * rect.height; index ? context.lineTo(px, py) : context.moveTo(px, py); });
+        context.stroke();
+      }
+    };
+    draw(); window.addEventListener("resize", draw);
+    return () => window.removeEventListener("resize", draw);
+  }, [strokes]);
+  const position = (event) => { const rect = canvasRef.current.getBoundingClientRect(); return [Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)), Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height))]; };
+  const start = (event) => { event.currentTarget.setPointerCapture(event.pointerId); activeStroke.current = true; setRedoStack([]); onChange([...strokes, { color, width: color === "#ffffff" ? 22 : 3, points: [position(event)] }]); };
+  const move = (event) => { if (!activeStroke.current) return; const point = position(event); onChange((previous) => { const next = [...previous]; const last = next[next.length - 1]; next[next.length - 1] = { ...last, points: [...last.points, point] }; return next; }); };
+  const undo = () => { if (!strokes.length) return; setRedoStack((stack) => [...stack, strokes[strokes.length - 1]]); onChange(strokes.slice(0, -1)); };
+  const redo = () => { if (!redoStack.length) return; onChange([...strokes, redoStack[redoStack.length - 1]]); setRedoStack((stack) => stack.slice(0, -1)); };
+  return <section className="drawing-board" dir="rtl"><div className="drawing-toolbar"><strong>دفتر السبورة</strong><button type="button" onClick={() => setColor("#111111")}>قلم أسود</button><button type="button" onClick={() => setColor("#c62828")}>قلم أحمر</button><button type="button" onClick={() => setColor("#ffffff")}>ممحاة</button><button type="button" onClick={undo} disabled={!strokes.length}>تراجع</button><button type="button" onClick={redo} disabled={!redoStack.length}>إعادة</button><button type="button" onClick={onClose}>تم</button></div><canvas ref={canvasRef} className="drawing-canvas" aria-label="مساحة الكتابة على السبورة" onPointerDown={start} onPointerMove={move} onPointerUp={() => { activeStroke.current = false; }} onPointerCancel={() => { activeStroke.current = false; }} /></section>;
 }
 function Tile({ icon, title, text, onClick, tone = "blue" }) {
   return (
