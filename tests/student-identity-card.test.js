@@ -6,13 +6,13 @@ test("prints an Arabic RTL student identity card without private follow-up detai
   const html = buildStudentIdentityCardHtml({
     id: 42, name: "ليان أحمد", grade: "الثامن", section: "ب",
     photo: "data:image/jpeg;base64,ZmFrZQ==",
-    grades: [{ subject: "علوم", value: 100 }],
+    grades: [{ subject: "علوم", value: 9876 }],
   }, { school: "ثانوية الإمام الشافعي", year: "2026 - 2027" });
   assert.match(html, /lang="ar" dir="rtl"/);
   assert.match(html, /ليان أحمد/);
   assert.match(html, /الثامن — الشعبة ب/);
   assert.match(html, /data:image\/jpeg;base64,ZmFrZQ==/);
-  assert.doesNotMatch(html, /100/);
+  assert.doesNotMatch(html, /9876/);
   assert.doesNotMatch(html, /العلامات/);
 });
 
