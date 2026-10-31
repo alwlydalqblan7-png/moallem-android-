@@ -35,6 +35,7 @@ import {
   Share2,
   RefreshCw,
   Bell,
+  Camera,
 } from "lucide-react";
 import { Printer } from "@capgo/capacitor-printer";
 import { Capacitor, registerPlugin } from "@capacitor/core";
@@ -51,7 +52,7 @@ import { attendanceDateKey, formatClassRoster, getDailyWidgetStatus, parseStuden
 import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
 import { calculateSciencePairSummary, calculateSubjectResult } from "./science-summary.js";
 import { buildStudentHomeworkMessage, filterHomeworkForClass, getHomeworkStatus, setHomeworkStatus, summarizeHomework } from "./homework.js";
-import { buildStudentProfileHtml, collectStudentProfile } from "./student-profile.js";
+import { buildStudentIdentityCardHtml, buildStudentProfileHtml, collectStudentProfile } from "./student-profile.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const HomeWidget = registerPlugin("HomeWidget");
 const BackupFile = registerPlugin("BackupFile");
@@ -200,7 +201,36 @@ const listPdfBlobs = async () => {
   db.close();
   return entries;
 };
-const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
+const studentPhotoToDataUrl = (file) => new Promise((resolve, reject) => {
+  if (!file || !/^image\/(jpeg|png|webp)$/.test(file.type || "")) return reject(new Error("اختر صورة بصيغة JPG أو PNG أو WebP."));
+  if (file.size > 10 * 1024 * 1024) return reject(new Error("حجم الصورة كبير؛ اختر صورة أصغر من 10 ميغابايت."));
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error("تعذرت قراءة الصورة."));
+  reader.onload = () => {
+    const image = new Image();
+    image.onerror = () => reject(new Error("تعذر فتح الصورة."));
+    image.onload = () => {
+      const maxSide = 360;
+      const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext("2d");
+      if (!context) return reject(new Error("تعذر تجهيز الصورة."));
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      let dataUrl = "";
+      for (const quality of [0.82, 0.72, 0.62, 0.52]) {
+        dataUrl = canvas.toDataURL("image/jpeg", quality);
+        if (dataUrl.length <= 140 * 1024) break;
+      }
+      if (dataUrl.length > 140 * 1024) return reject(new Error("تعذر ضغط الصورة للحجم المناسب؛ اختر صورة أصغر."));
+      resolve(dataUrl);
+    };
+    image.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+const blobToDataUrl = (blob) => new Promise((resolve, reject) =>
   const reader = new FileReader();
   reader.onload = () => resolve(reader.result);
   reader.onerror = () => reject(reader.error);
@@ -530,6 +560,8 @@ function App() {
   const [studentNotes, setStudentNotes] = useState(() => load("m2_student_notes", []));
   const [profileStudentId, setProfileStudentId] = useState(null);
   const [studentNoteDraft, setStudentNoteDraft] = useState("");
+  const [studentPhotoMessage, setStudentPhotoMessage] = useState("");
+  const studentPhotoInputRef = useRef(null);
   const [knowledgeQuery, setKnowledgeQuery] = useState("");
   const [knowledgeTypeFilter, setKnowledgeTypeFilter] = useState("الكل");
   const [knowledgeFormOpen, setKnowledgeFormOpen] = useState(false);
@@ -1305,7 +1337,43 @@ ${sourceExcerpt}
   const openStudentProfile = (student) => {
     setProfileStudentId(student.id);
     setStudentNoteDraft("");
+    setStudentPhotoMessage("");
     setTab("student-profile");
+  };
+  const saveStudentPhoto = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !profileStudent) return;
+    try {
+      const photo = await studentPhotoToDataUrl(file);
+      const nextStudents = students.map((student) => String(student.id) === String(profileStudent.id) ? { ...student, photo } : student);
+      localStorage.setItem("m2_students", JSON.stringify(nextStudents));
+      setStudents(nextStudents);
+      setStudentPhotoMessage("تم حفظ الصورة على هذا الجهاز، وستدخل ضمن النسخ الاحتياطية الجديدة.");
+    } catch (error) {
+      setStudentPhotoMessage(error?.name === "QuotaExceededError"
+        ? "مساحة التخزين غير كافية لحفظ الصورة. خفّف الصور أو احذف صورة قديمة بعد التأكد من وجود نسخة احتياطية."
+        : error?.message || "تعذر حفظ الصورة.");
+    }
+  };
+  const removeStudentPhoto = () => {
+    if (!profileStudent || !confirm("حذف صورة هذا الطالب؟")) return;
+    const nextStudents = students.map((student) => {
+      if (String(student.id) !== String(profileStudent.id)) return student;
+      const { photo, ...withoutPhoto } = student;
+      return withoutPhoto;
+    });
+    try {
+      localStorage.setItem("m2_students", JSON.stringify(nextStudents));
+      setStudents(nextStudents);
+      setStudentPhotoMessage("تم حذف صورة هذا الطالب.");
+    } catch {
+      setStudentPhotoMessage("تعذر تحديث بيانات الطالب.");
+    }
+  };
+  const printStudentIdentityCard = () => {
+    if (!profileStudent) return;
+    printDocument(`بطاقة الطالب ${profileStudent.name}`, buildStudentIdentityCardHtml(profileStudent, schoolSettings));
   };
   const saveStudentNote = () => {
     const text = studentNoteDraft.trim();
@@ -1901,9 +1969,29 @@ ${sourceExcerpt}
             )}
             {tab === "student-profile" && profileStudent && studentProfile && (
               <section className="panel student-profile-panel" dir="rtl">
+                <div className="student-id-card">
+                  <div className="student-photo-frame">
+                    {profileStudent.photo
+                      ? <img src={profileStudent.photo} alt={`صورة ${profileStudent.name}`} className="student-photo" />
+                      : <div className="student-photo-placeholder"><Users size={30} /><span>لا توجد صورة</span></div>}
+                  </div>
+                  <div className="student-id-details">
+                    <span className="eyebrow">بطاقة الطالب · متابعة خاصة</span>
+                    <h2>{profileStudent.name}</h2>
+                    <p>{profileStudent.grade} — الشعبة {profileStudent.section}</p>
+                    <small>رقم الطالب: {profileStudent.id}</small>
+                  </div>
+                  <input ref={studentPhotoInputRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={saveStudentPhoto} />
+                  <div className="actions student-id-actions">
+                    <button type="button" onClick={() => studentPhotoInputRef.current?.click()}><Camera size={16}/>{profileStudent.photo ? "تغيير الصورة" : "إضافة صورة"}</button>
+                    {profileStudent.photo && <button type="button" className="danger" onClick={removeStudentPhoto}>حذف الصورة</button>}
+                    <button type="button" onClick={printStudentIdentityCard}><PrinterIcon size={16}/> طباعة البطاقة</button>
+                  </div>
+                </div>
+                {studentPhotoMessage && <p className="note" role="status">{studentPhotoMessage}</p>}
                 <div className="panelhead">
                   <div>
-                    <span className="eyebrow">متابعة الطالب</span>
+                    <span className="eyebrow">ملف المتابعة</span>
                     <h2>{profileStudent.name}</h2>
                     <p>{profileStudent.grade} — الشعبة {profileStudent.section}</p>
                   </div>
