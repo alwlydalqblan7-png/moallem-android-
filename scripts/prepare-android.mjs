@@ -61,16 +61,22 @@ if (!strings.includes("name=\"moallem_widget_description\"")) {
 // environment. Debug builds need no signing secret.
 const appBuildPath = "android/app/build.gradle";
 let appBuild = readFileSync(appBuildPath, "utf8");
-if (!appBuild.includes('applicationIdSuffix ".test"')) {
-  appBuild = appBuild.replace("buildTypes {", 'buildTypes {\n        debug {\n            // Install test builds beside production without touching its app data.\n            applicationIdSuffix ".test"\n        }');
+const debugSuffix = process.env.MOALLEM_DEBUG_APP_ID_SUFFIX || ".test";
+if (!/^\.[A-Za-z0-9.]+$/.test(debugSuffix)) throw new Error("MOALLEM_DEBUG_APP_ID_SUFFIX must begin with a dot and contain only letters, digits, or dots");
+const debugLabel = (process.env.MOALLEM_DEBUG_APP_LABEL || "معلّم تجريبي 2026-2027").replaceAll('"', "");
+if (!appBuild.includes("applicationIdSuffix")) {
+  appBuild = appBuild.replace("buildTypes {", `buildTypes {\n        debug {\n            // Install test builds beside production without touching its app data.\n            applicationIdSuffix "${debugSuffix}"\n        }`);
+} else {
+  appBuild = appBuild.replace(/applicationIdSuffix\s+["'][^"']+["']/, `applicationIdSuffix "${debugSuffix}"`);
 }
-// Give the side-by-side test build a launcher label that cannot be confused
-// with the production app, which keeps the same visual interface and icon.
-if (!appBuild.includes('resValue "string", "app_name", "معلّم تجريبي 2026-2027"')) {
-  appBuild = appBuild.replace(
-    'applicationIdSuffix ".test"',
-    'applicationIdSuffix ".test"\n            resValue "string", "app_name", "معلّم تجريبي 2026-2027"\n            resValue "string", "title_activity_main", "معلّم تجريبي 2026-2027"',
-  );
+// Distinguish each test build in the launcher while preserving the production app label.
+const appNameValue = `resValue "string", "app_name", "${debugLabel}"`;
+const activityTitleValue = `resValue "string", "title_activity_main", "${debugLabel}"`;
+if (!appBuild.includes('resValue "string", "app_name"')) {
+  appBuild = appBuild.replace(`applicationIdSuffix "${debugSuffix}"`, `applicationIdSuffix "${debugSuffix}"\n            ${appNameValue}\n            ${activityTitleValue}`);
+} else {
+  appBuild = appBuild.replace(/resValue\s+["']string["'],\s*["']app_name["'],\s*["'][^"']*["']/, appNameValue);
+  appBuild = appBuild.replace(/resValue\s+["']string["'],\s*["']title_activity_main["'],\s*["'][^"']*["']/, activityTitleValue);
 }
 const versionCode = Number(process.env.MOALLEM_VERSION_CODE || 1);
 if (!Number.isSafeInteger(versionCode) || versionCode < 1) throw new Error("MOALLEM_VERSION_CODE must be a positive integer");
