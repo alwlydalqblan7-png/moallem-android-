@@ -1,0 +1,39 @@
+name: Build Moallem Windows App
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/windows-laptop-app-2026]
+    paths:
+      - "src/**"
+      - "public/**"
+      - "assets/**"
+      - "desktop/**"
+      - "package.json"
+      - "package-lock.json"
+      - "index.html"
+      - ".github/workflows/build-windows-desktop.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npx vite build --base=./
+      - run: npx electron-builder --win nsis portable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Moallem-Windows-Desktop
+          path: release/*.exe
+          if-no-files-found: error
+          retention-days: 30
