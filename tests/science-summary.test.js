@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { calculateSciencePairSummary, calculateSubjectResult } from "../src/science-summary.js";
+import { officialGradeColumns, officialGradeMaximum } from "../src/official-grade-distribution.js";
 
 function makeBook(work, exam) {
   return {
@@ -37,4 +38,26 @@ test("combined total stays blank until both subject books exist", () => {
   assert.equal(result.science, 50);
   assert.equal(result.physicsChemistry, null);
   assert.equal(result.total, null);
+});
+
+test("science and physics-chemistry use 200 work points plus 200 exam points and average them", () => {
+  const makeRequestedBook = (grade, subject, marks) => ({
+    columns: officialGradeColumns(grade, subject),
+    marks: { "student-1": marks },
+  });
+  const gradebooks = {
+    "السابع|أ|العلوم": makeRequestedBook("السابع", "العلوم", {
+      official_0: 50, official_1: 50, official_2: 100, official_final_exam: 150,
+    }),
+    "السابع|أ|الفيزياء والكيمياء": makeRequestedBook("السابع", "الفيزياء والكيمياء", {
+      official_0: 25, official_1: 25, official_2: 50, official_final_exam: 100,
+    }),
+  };
+  const result = calculateSciencePairSummary(gradebooks, "السابع", "أ", "student-1", officialGradeMaximum);
+  assert.equal(result.science, 175);
+  assert.equal(result.physicsChemistry, 100);
+  assert.equal(result.total, 275);
+  assert.deepEqual(gradebooks["السابع|أ|العلوم"].marks["student-1"], {
+    official_0: 50, official_1: 50, official_2: 100, official_final_exam: 150,
+  });
 });

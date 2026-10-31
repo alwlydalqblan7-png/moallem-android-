@@ -14,8 +14,18 @@ const arabic = [
 const standard = [
   ["شفهي", 25], ["وظائف", 25], ["مذاكرة", 50]
 ];
+const teacherSpecified200Subjects = new Set(["العلوم", "الفيزياء والكيمياء"]);
+
+export function isTeacherSpecified200Subject(subject) {
+  return teacherSpecified200Subjects.has(subject);
+}
+
+export function isOfficialGradeSubject(grade, subject) {
+  return grades[grade]?.[subject] != null;
+}
+
 export function officialGradeColumns(grade, subject) {
-  const max = grades[grade]?.[subject];
+  const max = grades[grade]?.[subject] ?? (grades[grade] && teacherSpecified200Subjects.has(subject) ? 200 : null);
   if (!max) return null;
   if (subject === "العلوم العامة") {
     const workColumns = ["العلوم", "الفيزياء والكيمياء"].flatMap((part, group) => standard.map(([name, percent], index) => ({
@@ -36,5 +46,5 @@ export function officialGradeColumns(grade, subject) {
   return [...columns, { id: "official_final_exam", name: "الامتحان الأخير", max, type: "امتحان نهائي" }];
 }
 export function officialGradeMaximum(grade, subject) {
-  return grades[grade]?.[subject] ?? null;
+  return grades[grade]?.[subject] ?? (grades[grade] && teacherSpecified200Subjects.has(subject) ? 200 : null);
 }

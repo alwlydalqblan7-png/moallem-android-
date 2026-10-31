@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { officialGradeColumns, officialGradeMaximum } from "../src/official-grade-distribution.js";
+import { isOfficialGradeSubject, isTeacherSpecified200Subject, officialGradeColumns, officialGradeMaximum } from "../src/official-grade-distribution.js";
 test("gradebook uses the supplied 2025-2026 subject maxima", () => {
   for (const [grade, subject, max] of [
     ["السابع", "المعلوماتية", 200], ["الثامن", "المعلوماتية", 200],
@@ -24,4 +24,16 @@ test("unsupported subjects do not receive invented official maxima", () => {
 
 test("200-point subjects have 50 oral, 50 homework, 100 quiz and 200 exam", () => {
   assert.deepEqual(officialGradeColumns("السابع", "المعلوماتية").map(col => col.max), [50, 50, 100, 200]);
+});
+
+test("standalone science and combined physics-chemistry use the requested 200+200 calculation structure", () => {
+  for (const grade of ["السابع", "الثامن", "التاسع", "العاشر", "الحادي عشر", "البكالوريا"]) {
+    for (const subject of ["العلوم", "الفيزياء والكيمياء"]) {
+      const columns = officialGradeColumns(grade, subject);
+      assert.equal(officialGradeMaximum(grade, subject), 200);
+      assert.deepEqual(columns.map(column => column.max), [50, 50, 100, 200]);
+      assert.equal(isTeacherSpecified200Subject(subject), true);
+      assert.equal(isOfficialGradeSubject(grade, subject), false);
+    }
+  }
 });

@@ -1,4 +1,4 @@
-import { officialGradeColumns, officialGradeMaximum } from "./official-grade-distribution.js";
+import { isTeacherSpecified200Subject, officialGradeColumns, officialGradeMaximum } from "./official-grade-distribution.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -2188,7 +2188,9 @@ ${sourceExcerpt}
                   <div className="column-tools">
                     {officialGradeMaximum(grade, subject) != null && (
                       <button type="button" onClick={applyOfficialDistribution}>
-                        اعتماد توزيع 2025–2026 ({officialGradeMaximum(grade, subject)})
+                        {isTeacherSpecified200Subject(subject)
+                          ? "اعتماد بنية الأعمال 200 والامتحان 200"
+                          : `اعتماد توزيع 2025–2026 (${officialGradeMaximum(grade, subject)})`}
                       </button>
                     )}
                     {split200 && !finalExamColumn && <button type="button" onClick={ensureFinalExam}>إضافة الامتحان الأخير وحساب المعدّل</button>}
@@ -2236,7 +2238,7 @@ ${sourceExcerpt}
                           </th>
                         ))}
                         {split200 && finalExamColumn && <th>درجة الأعمال /{officialMax}</th>}
-                        <th>{split200 && finalExamColumn ? "العلامة النهائية /{officialMax}" : "المجموع"}</th>
+                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : "المجموع"}</th>
                         <th>النسبة</th>
                         {showSciencePairSummary && <>
                           <th>محصلة العلوم</th>
