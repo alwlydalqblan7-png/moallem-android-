@@ -377,7 +377,7 @@ main{padding:11px}
 /* Student follow-up profile */
 .studentrow{grid-template-columns:38px minmax(0,1fr) 115px 80px auto 44px 44px}
 .student-profile-button{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:38px;padding:7px 9px;border:1px solid #d6e4ee;border-radius:10px;background:#f2f8fc;color:#1769aa;font:inherit;font-size:12px;font-weight:700;white-space:nowrap}
-.student-profile-panel{display:grid;gap:12px}
+.student-profile-panel{display:grid;gap:12px;min-width:0;width:100%}
 .student-profile-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:8px}
 .student-profile-summary article{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:5px;padding:11px;border:1px solid #dce6ee;border-radius:13px;background:#f8fbfd}
 .student-profile-summary small{grid-column:1/-1;color:var(--muted);font-size:12px}
@@ -403,6 +403,7 @@ main{padding:11px}
 .student-note-list small{color:var(--muted)}
 .student-note-list p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:650px){
+  .student-profile-panel{padding:12px;overflow:hidden}
   .studentrow{grid-template-columns:32px repeat(4,minmax(0,1fr))}
   .studentrow>input{grid-column:2/-1;min-width:0}
   .studentrow select:first-of-type{grid-column:2/4}
@@ -411,8 +412,11 @@ main{padding:11px}
   .studentrow button[title^="مشاركة"]{grid-column:3}
   .studentrow button.danger{grid-column:4}
   .student-profile-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .student-profile-panel .panelhead>.actions{width:100%}
-  .student-profile-panel .panelhead>.actions button{flex:1}
+  .student-profile-panel .panelhead>.actions{display:grid;grid-template-columns:minmax(0,1fr);width:100%;min-width:0}
+  .student-profile-panel .panelhead>.actions button{width:100%;min-width:0;white-space:normal;justify-content:center}
+  .student-profile-panel .profile-block{min-width:0;padding:10px}
+  .student-profile-panel .profile-table-scroll{max-width:100%;overscroll-behavior-inline:contain}
+  .student-profile-panel .student-note-list article>div{min-width:0}
 }
 
 /* Private student identity card with locally stored portrait */
@@ -426,4 +430,4 @@ main{padding:11px}
 .student-id-details small{color:#6c8192}
 .student-id-actions{display:grid;justify-items:stretch;gap:7px}
 .student-id-actions button{min-height:38px}
-@media(max-width:650px){.student-id-card{grid-template-columns:76px minmax(0,1fr);gap:11px;padding:12px}.student-photo-frame{width:76px;height:92px}.student-id-actions{grid-column:1/-1;display:flex;flex-wrap:wrap}.student-id-actions button{flex:1}.student-id-details .eyebrow{font-size:10px}}
+@media(max-width:650px){.student-id-card{width:100%;min-width:0;grid-template-columns:68px minmax(0,1fr);gap:10px;padding:11px}.student-photo-frame{width:68px;height:82px}.student-id-details{overflow-wrap:anywhere}.student-id-details h2{font-size:20px;line-height:1.45}.student-id-details p{font-size:14px}.student-id-details small{display:block;overflow-wrap:anywhere}.student-id-actions{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr);width:100%;min-width:0}.student-id-actions button{width:100%;min-width:0;white-space:normal;justify-content:center}.student-id-details .eyebrow{font-size:10px}}
