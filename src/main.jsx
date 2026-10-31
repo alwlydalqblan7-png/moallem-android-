@@ -230,7 +230,7 @@ const studentPhotoToDataUrl = (file) => new Promise((resolve, reject) => {
   };
   reader.readAsDataURL(file);
 });
-const blobToDataUrl = (blob) => new Promise((resolve, reject) =>
+const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onload = () => resolve(reader.result);
   reader.onerror = () => reject(reader.error);
