@@ -4,6 +4,17 @@ import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
 export function calculateSubjectResult(book, studentId, officialMaximum = null) {
   const columns = Array.isArray(book?.columns) ? book.columns : [];
   const marks = book?.marks?.[studentId] || {};
+  const scienceExamColumns = [0, 1].map((index) => columns.find((column) => column.id === `official_science_exam_${index}`));
+  if (scienceExamColumns.every(Boolean)) {
+    const components = [0, 1].map((group) => calculateGeneralScienceComponent(book, studentId, group));
+    const completed = components.every((component) => component.exam != null);
+    return {
+      value: components.reduce((total, component) => total + component.value, 0),
+      maximum: 400,
+      pendingExam: !completed,
+      components,
+    };
+  }
   const examColumn = columns.find((column) => column.id === "official_final_exam");
   if (Number.isFinite(Number(officialMaximum)) && Number(officialMaximum) > 0 && examColumn) {
     const workColumns = columns.filter((column) => column.id !== "official_final_exam");
@@ -31,18 +42,44 @@ export function calculateSubjectResult(book, studentId, officialMaximum = null) 
   return calculateGradebookTotals(marks, columns);
 }
 
+export function calculateGeneralScienceComponent(book, studentId, group) {
+  const columns = Array.isArray(book?.columns) ? book.columns : [];
+  const marks = book?.marks?.[studentId] || {};
+  const workColumns = columns.filter((column) =>
+    column.id.startsWith(`official_science_${group}_`),
+  );
+  const work = calculateGradebookTotals(marks, workColumns).earned;
+  const examColumn = columns.find((column) => column.id === `official_science_exam_${group}`);
+  const examValue = examColumn ? marks[examColumn.id] : null;
+  const exam = examValue === "" || examValue == null
+    ? null
+    : normalizeMarkInput(examValue, examColumn.max);
+  return {
+    value: exam == null ? work : (work + exam) / 2,
+    maximum: 200,
+    work,
+    exam,
+    pendingExam: exam == null,
+  };
+}
+
 export function calculateSciencePairSummary(gradebooks, grade, section, studentId, getOfficialMaximum = () => null) {
   const scienceBook = gradebooks[`${grade}|${section}|العلوم`];
   const physicsChemistryBook = gradebooks[`${grade}|${section}|الفيزياء والكيمياء`];
+  const generalScienceBook = gradebooks[`${grade}|${section}|العلوم العامة`];
+  const legacySummary = calculateSubjectResult(generalScienceBook, studentId, 400);
+  const hasLegacyPair = Array.isArray(legacySummary.components) && legacySummary.components.length === 2;
   const science = calculateSubjectResult(scienceBook, studentId, getOfficialMaximum(grade, "العلوم"));
   const physicsChemistry = calculateSubjectResult(physicsChemistryBook, studentId, getOfficialMaximum(grade, "الفيزياء والكيمياء"));
-  const hasScience = Boolean(scienceBook?.columns?.length);
-  const hasPhysicsChemistry = Boolean(physicsChemistryBook?.columns?.length);
+  const hasScience = Boolean(scienceBook?.columns?.length) || hasLegacyPair;
+  const hasPhysicsChemistry = Boolean(physicsChemistryBook?.columns?.length) || hasLegacyPair;
+  const scienceValue = scienceBook?.columns?.length ? (science.value ?? science.earned) : legacySummary.components?.[0]?.value;
+  const physicsChemistryValue = physicsChemistryBook?.columns?.length ? (physicsChemistry.value ?? physicsChemistry.earned) : legacySummary.components?.[1]?.value;
   return {
-    science: hasScience ? science.value ?? science.earned : null,
-    physicsChemistry: hasPhysicsChemistry ? physicsChemistry.value ?? physicsChemistry.earned : null,
+    science: hasScience ? scienceValue : null,
+    physicsChemistry: hasPhysicsChemistry ? physicsChemistryValue : null,
     total: hasScience && hasPhysicsChemistry
-      ? (science.value ?? science.earned) + (physicsChemistry.value ?? physicsChemistry.earned)
+      ? scienceValue + physicsChemistryValue
       : null,
   };
 }

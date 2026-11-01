@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { calculateSciencePairSummary, calculateSubjectResult } from "../src/science-summary.js";
+import { officialGradeColumns } from "../src/official-grade-distribution.js";
 
 function makeBook(work, exam) {
   return {
@@ -37,4 +38,42 @@ test("combined total stays blank until both subject books exist", () => {
   assert.equal(result.science, 50);
   assert.equal(result.physicsChemistry, null);
   assert.equal(result.total, null);
+});
+
+test("official grade 8 science keeps the two 200-point results separate and averages work with exam", () => {
+  const columns = officialGradeColumns("الثامن", "العلوم العامة");
+  const book = {
+    columns,
+    marks: {
+      "student-1": {
+        official_science_0_0: 25,
+        official_science_0_1: 25,
+        official_science_0_2: 50,
+        official_science_exam_0: 150,
+        official_science_1_0: 40,
+        official_science_1_1: 30,
+        official_science_1_2: 80,
+        official_science_exam_1: 100,
+      },
+    },
+  };
+  const gradebooks = { "الثامن|أ|العلوم العامة": book };
+  const pair = calculateSciencePairSummary(gradebooks, "الثامن", "أ", "student-1");
+  assert.deepEqual(pair, { science: 125, physicsChemistry: 125, total: 250 });
+  const combined = calculateSubjectResult(book, "student-1", 400);
+  assert.equal(combined.value, 250);
+  assert.equal(combined.maximum, 400);
+  assert.equal(combined.pendingExam, false);
+});
+
+test("official general science summary marks results pending separately until both exams are entered", () => {
+  const book = {
+    columns: officialGradeColumns("السابع", "العلوم العامة"),
+    marks: { "student-1": { official_science_0_0: 25, official_science_0_1: 25, official_science_0_2: 50 } },
+  };
+  const result = calculateSubjectResult(book, "student-1", 400);
+  assert.equal(result.value, 100);
+  assert.equal(result.pendingExam, true);
+  assert.equal(result.components[0].value, 100);
+  assert.equal(result.components[1].value, 0);
 });

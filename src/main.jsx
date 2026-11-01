@@ -757,8 +757,10 @@ function App() {
   const officialMax = officialGradeMaximum(grade, subject);
   const split200 = Boolean(officialMax);
   const finalExamColumn = book.columns.find(c => c.id === "official_final_exam");
+  const generalScienceExamColumns = [0, 1].map((index) => book.columns.find(c => c.id === `official_science_exam_${index}`));
+  const hasOfficialExam = Boolean(finalExamColumn) || generalScienceExamColumns.every(Boolean);
   const ensureFinalExam = () => {
-    if (finalExamColumn) return;
+    if (hasOfficialExam) return;
     updateBook({ ...book, columns: [...book.columns, {
       id: "official_final_exam", name: "الامتحان الأخير", max: officialMax, type: "امتحان نهائي",
     }] });
@@ -767,13 +769,21 @@ function App() {
     const m = book.marks[s.id] || {};
     const totals = calculateGradebookTotals(m, book.columns);
     let { earned: got, maximum: max } = totals;
+    if (subject === "العلوم العامة" && generalScienceExamColumns.every(Boolean)) {
+      const result = calculateSubjectResult(book, s.id, officialMax);
+      const works = result.components.reduce((sum, component) => sum + component.work, 0);
+      const exams = result.components.reduce((sum, component) => sum + (component.exam ?? 0), 0);
+      return { got: result.value, max: officialMax, pct: Math.round((result.value / officialMax) * 1000) / 10,
+        works, exam: result.pendingExam ? null : exams, final: result.pendingExam ? null : result.value,
+        split: true, pendingExam: result.pendingExam };
+    }
     if (split200 && finalExamColumn) {
       const workCols = book.columns.filter(c => c.id !== "official_final_exam");
       const works = calculateGradebookTotals(m, workCols).earned;
       const exam = m.official_final_exam === "" || m.official_final_exam == null ? null : normalizeMarkInput(m.official_final_exam, finalExamColumn.max);
       const final = exam == null ? null : (works + exam) / 2;
       return { got: final ?? works, max: officialMax, pct: Math.round(((final ?? works) / officialMax) * 1000) / 10,
-        works, exam, final, split: true };
+        works, exam, final, split: true, pendingExam: exam == null };
     }
     if (subject === "العلوم" || subject === "الفيزياء والكيمياء") {
       const result = calculateSubjectResult(book, s.id, officialMax);
@@ -2165,12 +2175,9 @@ ${sourceExcerpt}
                     </p>
                     {isGeneralScience && (
                       <div className="science-scale">
-                        {GENERAL_SCIENCE_BRANCHES.map((b) => (
-                          <span key={b.id}>
-                            {b.name} <b>{b.max}</b>
-                          </span>
-                        ))}
-                        <strong>المجموع {GENERAL_SCIENCE_TOTAL}</strong>
+                        <span>العلوم <b>200</b></span>
+                        <span>الفيزياء والكيمياء <b>200</b></span>
+                        <strong>المجموع <b>400</b></strong>
                       </div>
                     )}
                   </div>
@@ -2191,7 +2198,7 @@ ${sourceExcerpt}
                         اعتماد توزيع 2025–2026 ({officialGradeMaximum(grade, subject)})
                       </button>
                     )}
-                    {split200 && !finalExamColumn && <button type="button" onClick={ensureFinalExam}>إضافة الامتحان الأخير وحساب المعدّل</button>}
+                    {split200 && !hasOfficialExam && <button type="button" onClick={ensureFinalExam}>إضافة الامتحان الأخير وحساب المعدّل</button>}
                     <button onClick={addColumn}>
                       <Plus size={16} /> إضافة عمود
                     </button>
@@ -2235,8 +2242,8 @@ ${sourceExcerpt}
                             )}
                           </th>
                         ))}
-                        {split200 && finalExamColumn && <th>درجة الأعمال /{officialMax}</th>}
-                        <th>{split200 && finalExamColumn ? "العلامة النهائية /{officialMax}" : "المجموع"}</th>
+                        {split200 && hasOfficialExam && <th>درجة الأعمال /{officialMax}</th>}
+                        <th>{split200 && hasOfficialExam ? `المحصلة /${officialMax}` : "المجموع"}</th>
                         <th>النسبة</th>
                         {showSciencePairSummary && <>
                           <th>محصلة العلوم</th>
@@ -2270,9 +2277,7 @@ ${sourceExcerpt}
                             ))}
                             {c.split && <td><b>{c.works}/{officialMax}</b></td>}
                             <td>
-                              <b>
-                                {c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`}
-                              </b>
+                              <b>{c.pendingExam ? "بانتظار الامتحان" : `${c.got}/${c.max}`}</b>
                             </td>
                             <td>
                               <b>{c.pct}%</b>
