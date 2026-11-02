@@ -56,9 +56,9 @@ export function updateBoardLesson(lessons, id, updates) {
 function renderBoardLesson(lesson) {
   const strokes = Array.isArray(lesson?.strokes) ? lesson.strokes : [];
   const paths = strokes.map((stroke) => {
-    const points = Array.isArray(stroke.points) ? stroke.points : [];
+    const points = simplifyBoardStroke(stroke.points);
     if (!points.length) return "";
-    const coordinates = points.map(([x, y]) => `${Math.round(Number(x) * 1000)} ${Math.round(Number(y) * 700)}`);
+    const coordinates = points.map(([x, y]) => `${(Number(x) * 1000).toFixed(1)} ${(Number(y) * 700).toFixed(1)}`);
     const d = coordinates.map((point, index) => `${index ? "L" : "M"} ${point}`).join(" ");
     const color = stroke.color === "#ffffff" ? "#ffffff" : /^#[0-9a-f]{6}$/i.test(stroke.color || "") ? stroke.color : "#111111";
     const width = Math.max(1, Math.min(30, Number(stroke.width) || 3));
@@ -66,6 +66,30 @@ function renderBoardLesson(lesson) {
   }).join("");
   const meta = [lesson?.grade, lesson?.section ? `الشعبة ${lesson.section}` : "", lesson?.subject, lesson?.date].filter(Boolean).map(escapeHtml).join(" · ");
   return `<section class="lesson-page"><h1>${escapeHtml(lesson?.title || "درس السبورة")}</h1><p class="meta">${meta}</p>${lesson?.content ? `<p class="content">${escapeHtml(lesson.content)}</p>` : ""}<div class="board"><svg viewBox="0 0 1000 700" preserveAspectRatio="none" role="img" aria-label="محتوى السبورة">${paths}</svg></div></section>`;
+}
+
+// Touch screens report many almost-identical coordinates. Thin those points
+// before creating print SVG paths; a 2.25-unit tolerance is visually negligible
+// at the print scale and greatly reduces WebView layout work for long lessons.
+export function simplifyBoardStroke(points, minimumDistance = 2.25) {
+  if (!Array.isArray(points)) return [];
+  const valid = points.filter((point) => Array.isArray(point) && Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1])));
+  if (valid.length <= 2) return valid;
+  const kept = [valid[0]];
+  const thresholdSquared = minimumDistance * minimumDistance;
+  let previous = valid[0];
+  for (let index = 1; index < valid.length - 1; index += 1) {
+    const point = valid[index];
+    const dx = (Number(point[0]) - Number(previous[0])) * 1000;
+    const dy = (Number(point[1]) - Number(previous[1])) * 700;
+    if ((dx * dx) + (dy * dy) >= thresholdSquared) {
+      kept.push(point);
+      previous = point;
+    }
+  }
+  const last = valid[valid.length - 1];
+  if (last !== kept[kept.length - 1]) kept.push(last);
+  return kept;
 }
 
 export function buildBoardLessonPrintHtml(lesson) {

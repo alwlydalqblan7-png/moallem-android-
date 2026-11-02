@@ -445,3 +445,5 @@ main{padding:11px}
   .profile-block{padding:10px}
   .student-note-form .primary{justify-self:stretch;width:100%}
 }
+.board-export-status{margin:0;padding:10px 12px;border:1px solid #d5e8f3;border-radius:11px;background:#f1f8fc;color:#315a73;font-size:13px;line-height:1.6}
+.board-primary:disabled,.board-secondary:disabled,.board-home-action:disabled{opacity:.65;cursor:wait}

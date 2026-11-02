@@ -13,6 +13,8 @@ export default function BoardNotebook({ lessons, setLessons, grade, section, sub
   const [activeStrokes, setActiveStrokes] = useState([]);
   const activeStrokesRef = useRef([]);
   const [filter, setFilter] = useState("all");
+  const [exporting, setExporting] = useState(false);
+  const [exportMessage, setExportMessage] = useState("");
   const [draft, setDraft] = useState({ title: "", grade, section, subject, date: dateKey(), content: "" });
   const activeLesson = lessons.find((lesson) => String(lesson.id) === String(activeId)) || null;
   const favoriteCount = lessons.filter((lesson) => lesson.favorite || lesson.status === "completed").length;
@@ -81,9 +83,22 @@ export default function BoardNotebook({ lessons, setLessons, grade, section, sub
     saveCurrentLesson();
     setPage("lessons");
   };
-  const exportLessons = (items) => {
+  const exportLessons = async (items) => {
+    if (exporting) return;
     if (!items.length) return window.alert("لا توجد دروس لتصديرها بعد.");
-    printDocument("دفتر السبورة", buildBoardLessonsPrintHtml(items));
+    setExporting(true);
+    setExportMessage("جارٍ تجهيز صفحات الطباعة… قد يستغرق ذلك لحظات إذا كانت الكتابة كثيرة.");
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    try {
+      const html = buildBoardLessonsPrintHtml(items);
+      await printDocument("دفتر السبورة", html);
+      setExportMessage("ظهرت نافذة الطباعة. اختر «حفظ كملف PDF» لتنزيل الدروس.");
+      window.setTimeout(() => setExportMessage(""), 9000);
+    } catch (error) {
+      setExportMessage(error?.message || "تعذر تجهيز الطباعة. جرّب تصدير درس واحد من قائمة دروسي.");
+    } finally {
+      setExporting(false);
+    }
   };
   const backHome = () => setPage("home");
 
@@ -120,8 +135,9 @@ export default function BoardNotebook({ lessons, setLessons, grade, section, sub
       </div>
       <div className="board-list-actions">
         <button type="button" className="board-primary" onClick={() => { makeDraft(); setPage("create"); }}><Plus size={19}/> إنشاء درس جديد</button>
-        <button type="button" className="board-secondary" onClick={() => exportLessons(page === "saved" ? visibleLessons : lessons)}><PrinterIcon size={18}/> تصدير PDF</button>
+        <button type="button" className="board-secondary" onClick={() => exportLessons(page === "saved" ? visibleLessons : lessons)} disabled={exporting}><PrinterIcon size={18}/> {exporting ? "جارٍ التجهيز…" : "تصدير PDF"}</button>
       </div>
+      {exportMessage && <p className="board-export-status" role="status" aria-live="polite">{exportMessage}</p>}
       {page === "lessons" && <label className="board-filter">عرض الدروس<select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">كل الدروس</option><option value="current">الصف والشعبة الحالية</option><option value="incomplete">غير المكتملة</option></select></label>}
       <div className="board-lesson-list">{visibleLessons.length ? visibleLessons.map((lesson, index) => (
         <article className="board-lesson-card" key={lesson.id}>
@@ -144,7 +160,8 @@ export default function BoardNotebook({ lessons, setLessons, grade, section, sub
       <div className="board-home-actions">
         <button type="button" className="board-home-action rose" onClick={() => setPage("lessons")}><span className="board-home-icon"><ClipboardList size={27}/></span><span><strong>دروسي</strong><small>عرض الدروس وإدارتها · {lessons.length} درس</small></span><ChevronLeft size={21}/></button>
         <button type="button" className="board-home-action rose" onClick={() => { makeDraft(); setPage("create"); }}><span className="board-home-icon"><Plus size={32}/></span><span><strong>إنشاء درس جديد</strong><small>ابدأ بعنوان الدرس والصف والمادة</small></span><ChevronLeft size={21}/></button>
-        <button type="button" className="board-home-action neutral" onClick={() => exportLessons(lessons)}><span className="board-home-icon"><PrinterIcon size={27}/></span><span><strong>تصدير الدروس PDF</strong><small>طباعة الدروس والكتابة المحفوظة</small></span><ChevronLeft size={21}/></button>
+        <button type="button" className="board-home-action neutral" onClick={() => exportLessons(lessons)} disabled={exporting}><span className="board-home-icon">{exporting ? "…" : <PrinterIcon size={27}/>}</span><span><strong>{exporting ? "جارٍ تجهيز PDF…" : "تصدير الدروس PDF"}</strong><small>{exporting ? "نختصر نقاط الكتابة لتسريع المعاينة" : "طباعة الدروس والكتابة المحفوظة"}</small></span><ChevronLeft size={21}/></button>
+        {exportMessage && <p className="board-export-status" role="status" aria-live="polite">{exportMessage}</p>}
         <button type="button" className="board-home-action amber" onClick={() => setPage("saved")}><span className="board-home-icon"><span className="board-star">★</span></span><span><strong>المحفوظات</strong><small>الدروس المفضلة والمكتملة · {favoriteCount}</small></span><ChevronLeft size={21}/></button>
       </div>
     </section>

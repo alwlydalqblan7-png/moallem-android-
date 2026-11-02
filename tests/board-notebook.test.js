@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildBoardLessonPrintHtml, buildBoardLessonsPrintHtml, createBoardLesson, migrateBoardLessons, updateBoardLesson, upsertBoardLesson } from "../src/board-notebook.js";
+import { buildBoardLessonPrintHtml, buildBoardLessonsPrintHtml, createBoardLesson, migrateBoardLessons, simplifyBoardStroke, updateBoardLesson, upsertBoardLesson } from "../src/board-notebook.js";
 
 test("new board lesson requires a title and stores class details and notes", () => {
   assert.throws(() => createBoardLesson({ title: "  " }), /عنوان الدرس/);
@@ -41,4 +41,14 @@ test("board PDF print output is Arabic RTL, escapes notes, and retains pen strok
   assert.match(html, /نقطة &lt;أولى&gt;/);
   assert.match(html, /stroke="#c62828"/);
   assert.match(buildBoardLessonsPrintHtml([lesson, lesson]), /class="lesson-page"/);
+});
+
+test("PDF stroke simplification keeps endpoints and removes redundant touch points", () => {
+  const denseStroke = Array.from({ length: 1001 }, (_, index) => [index / 10000, 0]);
+  const original = structuredClone(denseStroke);
+  const simple = simplifyBoardStroke(denseStroke);
+  assert.deepEqual(simple[0], denseStroke[0]);
+  assert.deepEqual(simple.at(-1), denseStroke.at(-1));
+  assert.ok(simple.length < 60, `expected a compact path, got ${simple.length} points`);
+  assert.deepEqual(denseStroke, original);
 });
