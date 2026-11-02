@@ -25,3 +25,15 @@ test("escapes text and rejects non-image data URLs for the student photo", () =>
   assert.doesNotMatch(html, /<script>alert/);
   assert.match(html, /class="photo placeholder"/);
 });
+
+test("uses the student's roster number instead of exposing an internal UUID", () => {
+  const html = buildStudentIdentityCardHtml({
+    id: "274ef06c-ee06-45fe-9208-9f72832ba5f6",
+    rosterNumber: 4,
+    name: "أحمد محمد بدر",
+    grade: "الثامن",
+    section: "أولى",
+  });
+  assert.match(html, /رقم الطالب في الشعبة: 4/);
+  assert.doesNotMatch(html, /274ef06c/);
+});

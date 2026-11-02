@@ -87,10 +87,14 @@ export function buildStudentProfileHtml(profile, school = {}) {
 
 export function buildStudentIdentityCardHtml(student, school = {}) {
   if (!student) throw new Error("بطاقة الطالب غير متوفرة");
+  const rosterNumber = student.rosterNumber ?? student.number ?? (/^\d+$/.test(String(student.id ?? "")) ? student.id : null);
+  const studentNumber = rosterNumber == null || rosterNumber === ""
+    ? ""
+    : `<div class="student-number">رقم الطالب في الشعبة: ${escapeHtml(rosterNumber)}</div>`;
   const safePhoto = /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(String(student.photo || ""))
     ? `<img class="photo" src="${escapeHtml(student.photo)}" alt="صورة ${escapeHtml(student.name)}">`
     : '<div class="photo placeholder">صورة الطالب</div>';
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>بطاقة الطالب</title><style>
     @page{size:100mm 65mm;margin:4mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;color:#173653}.card{height:56mm;border:1.2mm solid #1b5a82;border-radius:4mm;padding:4mm;display:flex;align-items:center;gap:5mm;position:relative;overflow:hidden;background:linear-gradient(135deg,#fff 68%,#edf6fb)}.photo{width:34mm;height:42mm;object-fit:cover;border-radius:3mm;border:1px solid #cbd9e3;flex:none}.placeholder{display:grid;place-items:center;background:#eaf1f6;color:#61778a;font-size:10pt;text-align:center}.details{min-width:0;flex:1}.school{font-size:9pt;color:#536b7d;margin-bottom:2mm}.label{font-size:8pt;color:#41738f;font-weight:bold}h1{font-size:17pt;margin:1mm 0 3mm;overflow-wrap:anywhere}.class{font-size:11pt;margin:0 0 2mm}.student-number{font-size:9pt;color:#526577}.footer{position:absolute;bottom:2mm;left:4mm;font-size:7pt;color:#718493}
-    </style></head><body><article class="card">${safePhoto}<div class="details"><div class="school">${escapeHtml(school.school || "بطاقة تعريف الطالب")}</div><div class="label">بطاقة الطالب</div><h1>${escapeHtml(student.name)}</h1><p class="class">الصف ${escapeHtml(student.grade)} — الشعبة ${escapeHtml(student.section)}</p><div class="student-number">رقم الطالب: ${escapeHtml(student.id)}</div></div><div class="footer">${escapeHtml(school.year || "")}</div></article></body></html>`;
+    </style></head><body><article class="card">${safePhoto}<div class="details"><div class="school">${escapeHtml(school.school || "بطاقة تعريف الطالب")}</div><div class="label">بطاقة الطالب</div><h1>${escapeHtml(student.name)}</h1><p class="class">الصف ${escapeHtml(student.grade)} — الشعبة ${escapeHtml(student.section)}</p>${studentNumber}</div><div class="footer">${escapeHtml(school.year || "")}</div></article></body></html>`;
 }

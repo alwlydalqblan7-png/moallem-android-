@@ -377,16 +377,16 @@ main{padding:11px}
 /* Student follow-up profile */
 .studentrow{grid-template-columns:38px minmax(0,1fr) 115px 80px auto 44px 44px}
 .student-profile-button{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:38px;padding:7px 9px;border:1px solid #d6e4ee;border-radius:10px;background:#f2f8fc;color:#1769aa;font:inherit;font-size:12px;font-weight:700;white-space:nowrap}
-.student-profile-panel{display:grid;gap:12px}
+.student-profile-panel{display:grid;gap:12px;min-width:0;width:100%}
 .student-profile-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:8px}
 .student-profile-summary article{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:5px;padding:11px;border:1px solid #dce6ee;border-radius:13px;background:#f8fbfd}
 .student-profile-summary small{grid-column:1/-1;color:var(--muted);font-size:12px}
 .student-profile-summary strong{color:var(--navy);font-size:22px}
 .student-profile-summary span{color:var(--muted);font-size:12px}
 .student-profile-summary .absent-text{color:#c62828}.student-profile-summary .pending-text{color:#9a6b00}
-.profile-block{padding:13px;border:1px solid #e1e9ef;border-radius:14px;background:#fff}
+.profile-block{min-width:0;padding:13px;border:1px solid #e1e9ef;border-radius:14px;background:#fff}
 .profile-block h3{margin:0 0 10px;color:var(--navy);font-size:16px}
-.profile-table-scroll{overflow:auto;border:1px solid #e5ecf1;border-radius:10px}
+.profile-table-scroll{max-width:100%;min-width:0;overflow-x:auto;overscroll-behavior-inline:contain;border:1px solid #e5ecf1;border-radius:10px}
 .student-profile-table{width:100%;min-width:480px;border-collapse:collapse;font-size:13px}
 .student-profile-table th,.student-profile-table td{padding:9px;text-align:right;border-bottom:1px solid #e8eef2}
 .student-profile-table th{background:#f2f7fa;color:#38566c}
@@ -411,19 +411,33 @@ main{padding:11px}
   .studentrow button[title^="مشاركة"]{grid-column:3}
   .studentrow button.danger{grid-column:4}
   .student-profile-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .student-profile-panel .panelhead>.actions{width:100%}
-  .student-profile-panel .panelhead>.actions button{flex:1}
+  .student-profile-panel>.panelhead{display:grid;grid-template-columns:minmax(0,1fr);width:100%;min-width:0}
+  .student-profile-panel .panelhead>.actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;min-width:0}
+  .student-profile-panel .panelhead>.actions button{width:100%;min-width:0;min-height:44px;padding:8px 6px;white-space:normal;line-height:1.35;text-align:center}
 }
 
 /* Private student identity card with locally stored portrait */
-.student-id-card{display:grid;grid-template-columns:96px minmax(0,1fr) auto;align-items:center;gap:16px;padding:16px;border:1px solid #d7e4ed;border-radius:18px;background:linear-gradient(120deg,#f5faff,#fff 65%);box-shadow:0 5px 18px #1736530b}
+.student-id-card{display:grid;grid-template-columns:96px minmax(0,1fr) auto;align-items:center;gap:16px;width:100%;min-width:0;padding:16px;border:1px solid #d7e4ed;border-radius:18px;background:linear-gradient(120deg,#f5faff,#fff 65%);box-shadow:0 5px 18px #1736530b}
 .student-photo-frame{width:96px;height:112px;overflow:hidden;border:2px solid #d4e4ef;border-radius:16px;background:#eaf2f7}
 .student-photo{display:block;width:100%;height:100%;object-fit:cover}
 .student-photo-placeholder{height:100%;display:grid;place-content:center;justify-items:center;gap:7px;color:#688096;font-size:12px}
 .student-id-details{min-width:0}
 .student-id-details h2{margin:5px 0;color:var(--navy);overflow-wrap:anywhere}
 .student-id-details p{margin:4px 0;color:var(--muted)}
-.student-id-details small{color:#6c8192}
-.student-id-actions{display:grid;justify-items:stretch;gap:7px}
-.student-id-actions button{min-height:38px}
-@media(max-width:650px){.student-id-card{grid-template-columns:76px minmax(0,1fr);gap:11px;padding:12px}.student-photo-frame{width:76px;height:92px}.student-id-actions{grid-column:1/-1;display:flex;flex-wrap:wrap}.student-id-actions button{flex:1}.student-id-details .eyebrow{font-size:10px}}
+.student-id-details small{display:block;color:#6c8192;overflow-wrap:anywhere}
+.student-id-actions{display:grid;grid-template-columns:minmax(0,1fr);justify-items:stretch;gap:7px;min-width:0}
+.student-id-actions button{min-width:0;min-height:40px;white-space:normal;line-height:1.35}
+@media(max-width:650px){
+  .student-profile-panel{overflow:hidden;padding:12px}
+  .student-id-card{grid-template-columns:68px minmax(0,1fr);gap:10px;padding:11px;border-radius:15px}
+  .student-photo-frame{width:68px;height:82px;border-radius:13px}
+  .student-id-details h2{font-size:clamp(18px,5vw,23px);line-height:1.35}
+  .student-id-details p{font-size:14px}
+  .student-id-details .eyebrow{font-size:10px;line-height:1.5}
+  .student-id-actions{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;gap:7px}
+  .student-id-actions button{width:100%;min-width:0;padding:8px 5px;font-size:12px}
+  .student-profile-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .student-profile-summary article{min-width:0;padding:9px}
+  .profile-block{padding:10px}
+  .student-note-form .primary{justify-self:stretch;width:100%}
+}
