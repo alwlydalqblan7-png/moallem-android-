@@ -1,4 +1,5 @@
 import { isTeacherSpecified200Subject, officialGradeColumns, officialGradeMaximum } from "./official-grade-distribution.js";
+import { calculateFirstTermResult, createFirstTermColumns, FIRST_TERM_SCHEME_ID } from "./semester-grade-scheme.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -85,6 +86,7 @@ const DEFAULT_SUBJECTS = [
   "الكيمياء",
   "علم الأحياء",
   "علم الأرض",
+  "الإحصاء",
   "التاريخ",
   "الجغرافيا",
   "المعلوماتية",
@@ -94,6 +96,7 @@ const DEFAULT_SUBJECTS = [
   "التربية الرياضية",
 ];
 const ADDED_SUBJECTS = ["العلوم", "الفيزياء والكيمياء"];
+const FIRST_TERM_TEACHER_SUBJECTS = new Set(["علم الأحياء", "الإحصاء", "المعلوماتية", "العلوم", "الفيزياء والكيمياء"]);
 const seedStudents = [
   { id: 1, name: "أحمد محمد", grade: "السابع", section: "أ" },
   { id: 2, name: "سارة خالد", grade: "السابع", section: "أ" },
@@ -106,6 +109,14 @@ const seedColumns = [
   { id: "c1", name: "مذاكرة 1", max: 10, type: "مذاكرة" },
   { id: "c2", name: "واجب", max: 5, type: "واجب" },
   { id: "c3", name: "امتحان", max: 50, type: "امتحان" },
+];
+const STUDENT_NOTE_PRESETS = [
+  "ملتزم بالدوام ويشارك بفاعلية في الحصة.",
+  "يُظهر تحسنًا ملحوظًا في مستواه الدراسي.",
+  "يحتاج إلى متابعة أداء الواجبات بانتظام.",
+  "يحتاج إلى مراجعة الدروس والمذاكرات بانتظام.",
+  "يرجى متابعة مستوى الطالب والتواصل مع المدرسة عند الحاجة.",
+  "يحتاج إلى مزيد من التركيز والانتباه أثناء الحصة.",
 ];
 const scienceTotalColumns = [
   {
@@ -704,8 +715,12 @@ function App() {
     [libraryBooks, grade],
   );
   const bookKey = `${grade}|${section}|${subject}`;
+  const defaultSubjectMaximum = officialGradeMaximum(grade, subject) || 100;
+  const usesFirstTermScheme = FIRST_TERM_TEACHER_SUBJECTS.has(subject);
   const book = gradebooks[bookKey] || {
-    columns: officialGradeColumns(grade, subject) || seedColumns,
+    gradingScheme: usesFirstTermScheme ? FIRST_TERM_SCHEME_ID : undefined,
+    gradingMaximum: defaultSubjectMaximum,
+    columns: usesFirstTermScheme ? createFirstTermColumns(defaultSubjectMaximum) : officialGradeColumns(grade, subject) || seedColumns,
     marks: {},
   };
   const updateBook = (next) =>
@@ -720,6 +735,14 @@ function App() {
       return;
     }
     updateBook({ ...book, columns });
+  };
+  const applyFirstTermScheme = () => {
+    const hasMarks = Object.values(book.marks || {}).some((row) => Object.values(row || {}).some((value) => value !== "" && value != null));
+    if (hasMarks) {
+      window.alert("هذا الدفتر يحتوي على علامات محفوظة. لم نغيّرها. أنشئ نسخة احتياطية أولًا، ثم انقل العلامات يدويًا إلى الأعمدة الجديدة لتجنب تغيير درجات الطلاب.");
+      return;
+    }
+    updateBook({ ...book, gradingScheme: FIRST_TERM_SCHEME_ID, gradingMaximum: defaultSubjectMaximum, columns: createFirstTermColumns(defaultSubjectMaximum), marks: book.marks || {} });
   };
   const addColumn = () =>
     updateBook({
@@ -755,7 +778,9 @@ function App() {
       },
     });
   const officialMax = officialGradeMaximum(grade, subject);
-  const split200 = Boolean(officialMax);
+  const firstTermScheme = book.gradingScheme === FIRST_TERM_SCHEME_ID;
+  const firstTermMaximum = Number(book.columns.find((column) => column.id === "term1_exam")?.max) || defaultSubjectMaximum;
+  const split200 = !firstTermScheme && Boolean(officialMax);
   const finalExamColumn = book.columns.find(c => c.id === "official_final_exam");
   const ensureFinalExam = () => {
     if (finalExamColumn) return;
@@ -765,6 +790,11 @@ function App() {
   };
   const calc = (s) => {
     const m = book.marks[s.id] || {};
+    if (firstTermScheme) {
+      const result = calculateFirstTermResult(book, s.id);
+      return { got: result.value, max: result.maximum, pct: Math.round((result.value / result.maximum) * 1000) / 10,
+        works: result.work, exam: result.exam, final: result.pendingExam ? null : result.value, split: true, firstTerm: true };
+    }
     const totals = calculateGradebookTotals(m, book.columns);
     let { earned: got, maximum: max } = totals;
     if (split200 && finalExamColumn) {
@@ -1375,10 +1405,14 @@ ${sourceExcerpt}
     if (!profileStudent) return;
     printDocument(`بطاقة الطالب ${profileStudent.name}`, buildStudentIdentityCardHtml(profileStudent, schoolSettings));
   };
-  const saveStudentNote = () => {
-    const text = studentNoteDraft.trim();
+  const addStudentNote = (value) => {
+    const text = String(value || "").trim();
     if (!profileStudent || !text) return;
-    setStudentNotes((items) => [{ id: `student-note-${Date.now()}`, studentId: profileStudent.id, text, createdAt: new Date().toISOString() }, ...items]);
+    setStudentNotes((items) => [{ id: `student-note-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, studentId: profileStudent.id, text, createdAt: new Date().toISOString() }, ...items]);
+  };
+  const saveStudentNote = () => {
+    if (!studentNoteDraft.trim()) return;
+    addStudentNote(studentNoteDraft);
     setStudentNoteDraft("");
   };
   const deleteStudentNote = (noteId) => {
@@ -1583,16 +1617,16 @@ ${sourceExcerpt}
     }
   };
   const buildGradebookHtml = () => {
-    const heads = book.columns
-      .map((c) => `<th>${c.name}<br><small>/${c.max}</small></th>`)
-      .join("");
-    const rows = classStudents
-      .map((s, i) => {
-        const c = calc(s);
-        return `<tr><td>${i + 1}</td><td>${s.name}</td>${book.columns.map((col) => `<td>${book.marks[s.id]?.[col.id] ?? ""}</td>`).join("")}<td>${c.got}/${c.max}</td><td>${c.pct}%</td></tr>`;
-      })
-      .join("");
-    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px}h1,h2{text-align:center}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #333;padding:7px;text-align:center}</style></head><body><h1>دفتر العلامات</h1><h2>${grade} — الشعبة ${section}</h2><p>المادة: ${subject}</p><table><tr><th>#</th><th>اسم الطالب</th>${heads}<th>المجموع</th><th>النسبة</th></tr>${rows}</table></body></html>`;
+    const heads = book.columns.map((c) => `<th>${c.name}<br><small>/${c.max}</small></th>`).join("");
+    const courseworkHead = firstTermScheme ? `<th>محصلة الفصل الأول /${firstTermMaximum}</th>` : split200 && finalExamColumn ? `<th>درجة الأعمال /${officialMax}</th>` : "";
+    const rows = classStudents.map((s, i) => {
+      const c = calc(s);
+      const coursework = c.split ? `<td>${c.works}/${c.firstTerm ? firstTermMaximum : officialMax}</td>` : "";
+      const final = c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`;
+      return `<tr><td>${i + 1}</td><td>${s.name}</td>${book.columns.map((col) => `<td>${book.marks[s.id]?.[col.id] ?? ""}</td>`).join("")}${coursework}<td>${final}</td><td>${c.pct}%</td></tr>`;
+    }).join("");
+    const finalHead = split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `العلامة النهائية /${firstTermMaximum}` : "المجموع";
+    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px}h1,h2{text-align:center}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #333;padding:7px;text-align:center}</style></head><body><h1>دفتر العلامات</h1><h2>${grade} — الشعبة ${section}</h2><p>المادة: ${subject}</p><table><tr><th>#</th><th>اسم الطالب</th>${heads}${courseworkHead}<th>${finalHead}</th><th>النسبة</th></tr>${rows}</table></body></html>`;
   };
   const buildReportCardsHtml = () => {
     const cards = classStudents
@@ -2022,7 +2056,7 @@ ${sourceExcerpt}
                 </section>
                 <section className="profile-block">
                   <h3>ملاحظات المعلم</h3>
-                  <div className="student-note-form"><textarea value={studentNoteDraft} onChange={event=>setStudentNoteDraft(event.target.value)} placeholder="اكتب ملاحظة متابعة لهذا الطالب..." rows={3}/><button type="button" className="primary" onClick={saveStudentNote} disabled={!studentNoteDraft.trim()}><Save size={16}/> حفظ الملاحظة</button></div>
+                  <p className="note">اضغط لإضافة أي ملاحظة جاهزة إلى سجل الطالب؛ يمكنك إضافة أكثر من ملاحظة، وتبقى كل واحدة محفوظة بتاريخها.</p><div className="student-note-presets">{STUDENT_NOTE_PRESETS.map((note) => <button type="button" key={note} onClick={() => addStudentNote(note)}>{note}</button>)}</div><div className="student-note-form"><textarea value={studentNoteDraft} onChange={event=>setStudentNoteDraft(event.target.value)} placeholder="اكتب ملاحظة متابعة لهذا الطالب..." rows={3}/><button type="button" className="primary" onClick={saveStudentNote} disabled={!studentNoteDraft.trim()}><Save size={16}/> حفظ الملاحظة</button></div>
                   {studentProfile.notes.length ? <div className="student-note-list">{studentProfile.notes.map(note=><article key={note.id}><div><small>{String(note.createdAt || "").slice(0,10)}</small><p>{note.text}</p></div><button type="button" className="danger" title="حذف الملاحظة" onClick={()=>deleteStudentNote(note.id)}><Trash2 size={15}/></button></article>)}</div> : <p className="empty-state">لا توجد ملاحظات مسجلة.</p>}
                 </section>
               </section>
@@ -2186,6 +2220,7 @@ ${sourceExcerpt}
                 </div>
                 {editMode && (
                   <div className="column-tools">
+                    {usesFirstTermScheme && !firstTermScheme && <button type="button" onClick={applyFirstTermScheme}>اعتماد نظام الفصل الأول (25 / 25 / 50 + امتحان حسب الدرجة العظمى)</button>}
                     {officialGradeMaximum(grade, subject) != null && (
                       <button type="button" onClick={applyOfficialDistribution}>
                         {isTeacherSpecified200Subject(subject)
@@ -2238,7 +2273,8 @@ ${sourceExcerpt}
                           </th>
                         ))}
                         {split200 && finalExamColumn && <th>درجة الأعمال /{officialMax}</th>}
-                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : "المجموع"}</th>
+                        {firstTermScheme && <th>محصلة الفصل الأول /{firstTermMaximum}</th>}
+                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `العلامة النهائية /${firstTermMaximum}` : "المجموع"}</th>
                         <th>النسبة</th>
                         {showSciencePairSummary && <>
                           <th>محصلة العلوم</th>
@@ -2270,7 +2306,7 @@ ${sourceExcerpt}
                                 />
                               </td>
                             ))}
-                            {c.split && <td><b>{c.works}/{officialMax}</b></td>}
+                            {c.split && <td><b>{c.works}/{c.firstTerm ? firstTermMaximum : officialMax}</b></td>}
                             <td>
                               <b>
                                 {c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`}

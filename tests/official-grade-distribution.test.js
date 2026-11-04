@@ -19,7 +19,7 @@ test("general science has two separately graded 200-point parts", () => {
   assert.deepEqual(officialGradeColumns("الثامن", "العلوم العامة").filter(x => x.id !== "official_final_exam").map(x => x.max), [50,50,100,50,50,100]);
 });
 test("unsupported subjects do not receive invented official maxima", () => {
-  assert.equal(officialGradeColumns("التاسع", "المعلوماتية"), null);
+  assert.equal(officialGradeColumns("التاسع", "التاريخ"), null);
 });
 
 test("200-point subjects have 50 oral, 50 homework, 100 quiz and 200 exam", () => {
@@ -36,4 +36,12 @@ test("standalone science and combined physics-chemistry use the requested 200+20
       assert.equal(isOfficialGradeSubject(grade, subject), false);
     }
   }
+});
+
+test("teacher-requested maxima cover biology, grade eleven statistics, and informatics", () => {
+  assert.equal(officialGradeMaximum("الثامن", "علم الأحياء"), 200);
+  assert.equal(officialGradeMaximum("الحادي عشر", "الإحصاء"), 100);
+  assert.equal(officialGradeMaximum("الحادي عشر", "المعلوماتية"), 200);
+  assert.deepEqual(officialGradeColumns("الحادي عشر", "الإحصاء").map(column => column.max), [25, 25, 50, 100]);
+  assert.deepEqual(officialGradeColumns("الثامن", "علم الأحياء").map(column => column.max), [50, 50, 100, 200]);
 });

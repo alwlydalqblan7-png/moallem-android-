@@ -1,7 +1,9 @@
 import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
+import { calculateFirstTermResult, FIRST_TERM_SCHEME_ID } from "./semester-grade-scheme.js";
 
 /** Calculates a subject result using the columns already saved in that subject's book. */
 export function calculateSubjectResult(book, studentId, officialMaximum = null) {
+  if (book?.gradingScheme === FIRST_TERM_SCHEME_ID) return calculateFirstTermResult(book, studentId);
   const columns = Array.isArray(book?.columns) ? book.columns : [];
   const marks = book?.marks?.[studentId] || {};
   const examColumn = columns.find((column) => column.id === "official_final_exam");

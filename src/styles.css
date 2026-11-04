@@ -395,6 +395,9 @@ main{padding:11px}
 .profile-attendance-status.absent,.profile-homework-status.absent{background:#fff0f0;color:#c62828}
 .profile-attendance-status.late{background:#fff6dd;color:#8c6500}
 .profile-homework-status.pending{background:#fff6dd;color:#8c6500}
+.student-note-presets{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin:10px 0}
+.student-note-presets button{text-align:right;white-space:normal;line-height:1.5;padding:10px 12px;border:1px solid #dce5ec;border-radius:10px;background:#f5f9fc;color:var(--ink);font:inherit;cursor:pointer}
+.student-note-presets button:hover{border-color:#7bb9d8;background:#eef7fc}
 .student-note-form{display:grid;gap:8px}
 .student-note-form textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #dce5ec;border-radius:10px;background:#fbfdfe;color:var(--ink);font:inherit;line-height:1.7;resize:vertical}
 .student-note-form .primary{justify-self:start}

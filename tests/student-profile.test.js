@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildStudentProfileHtml, collectStudentProfile } from "../src/student-profile.js";
+import { createFirstTermColumns, FIRST_TERM_SCHEME_ID } from "../src/semester-grade-scheme.js";
 
 const student = { id: 7, name: "ليان", grade: "الثامن", section: "أ" };
 
@@ -62,4 +63,11 @@ test("printable profile is Arabic RTL and escapes user supplied text", () => {
   assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"));
   assert.doesNotMatch(html, /<script>alert/);
   assert.doesNotMatch(html, /<img src=x/);
+});
+
+test("student profile calculates first-term result on a 200-point subject scale", () => {
+  const book = { gradingScheme: FIRST_TERM_SCHEME_ID, columns: createFirstTermColumns(200), marks: { 7: { term1_oral: 40, term1_homework: 50, term1_quiz: 80, term1_exam: 180 } } };
+  const profile = collectStudentProfile({ student, gradebooks: { "الثامن|أ|علم الأحياء": book } });
+  assert.equal(profile.grades[0].value, 175);
+  assert.equal(profile.grades[0].maximum, 200);
 });
