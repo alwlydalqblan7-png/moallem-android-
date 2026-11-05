@@ -5,12 +5,20 @@ const DB_NAME = "moallem_cloud_sync";
 const STORE = "state";
 let account = null, cryptoKey = null, baseline = null, version = 0, busy = false, applying = false, timer = 0;
 const enc = new TextEncoder(), dec = new TextDecoder();
-const toB64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+const toB64 = (bytes) => {
+  const view = new Uint8Array(bytes); let binary = "";
+  for (let i = 0; i < view.length; i += 0x8000) binary += String.fromCharCode(...view.subarray(i, i + 0x8000));
+  return btoa(binary);
+};
 const fromB64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 const toHex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
-const localData = () => Object.fromEntries(Object.keys(localStorage).filter((k) => k.startsWith(PREFIX)).sort().map((k) => [k, localStorage.getItem(k)]));
+const localKeys = () => Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter(Boolean);
+const localData = () => Object.fromEntries(localKeys().filter((k) => k.startsWith(PREFIX)).sort().map((k) => [k, localStorage.getItem(k)]));
 const emptyData = (data) => Object.keys(data || {}).length === 0;
-const sameData = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
+const sameData = (a, b) => {
+  const stable = (value) => JSON.stringify(Object.fromEntries(Object.entries(value || {}).sort(([x], [y]) => x.localeCompare(y))));
+  return stable(a) === stable(b);
+};
 const api = async (path, method = "GET", body = null, auth = true) => {
   if (!API) throw new Error("عنوان خدمة المزامنة غير مضبوط.");
   const headers = { "Content-Type": "application/json" };
@@ -58,10 +66,10 @@ const restoreAccount = async () => {
 };
 const applyData = async (data) => {
   const backup = localData();
-  await localPut("pre-sync-backup:" + account.email + ":" + Date.now(), backup);
+  await localPut("pre-sync-backup:" + account.email, backup);
   applying = true;
   try {
-    for (const key of Object.keys(localStorage)) if (key.startsWith(PREFIX) && !(key in data)) localStorage.removeItem(key);
+    for (const key of localKeys()) if (key.startsWith(PREFIX) && !(key in data)) localStorage.removeItem(key);
     for (const [key, value] of Object.entries(data)) localStorage.setItem(key, value);
     baseline = data; await localPut("baseline:" + account.email, data);
     setTimeout(() => location.reload(), 250);
