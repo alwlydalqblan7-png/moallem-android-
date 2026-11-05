@@ -1,0 +1,11 @@
+name = "moallem-sync"
+main = "worker.js"
+compatibility_date = "2026-11-05"
+
+[[durable_objects.bindings]]
+name = "SYNC_STORE"
+class_name = "SyncAccount"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SyncAccount"]
