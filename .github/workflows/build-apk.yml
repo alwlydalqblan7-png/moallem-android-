@@ -3,7 +3,7 @@ name: Build Moallem Safe APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/official-preparation-2026-2027, feature/safe-preparation-integration, feature/gradebook-weekly-widget-2026-2027, feature/windows-laptop-app-2026, feature/semester-grades-student-notes-2026]
+    branches: [main, feature/official-preparation-2026-2027, feature/safe-preparation-integration, feature/gradebook-weekly-widget-2026-2027, feature/windows-laptop-app-2026, feature/semester-grades-student-notes-2026, feature/automatic-cloud-sync-2026-11]
 
 jobs:
   build:
@@ -27,6 +27,7 @@ jobs:
       - name: Build web app
         env:
           VITE_AI_API_URL: https://moallem-ai.liondangerous65.workers.dev/api/ai
+          VITE_SYNC_API_URL: https://moallem-sync.liondangerous65.workers.dev/api
         run: npm run build
       - name: Create Android project
         run: test -d android || npx cap add android
