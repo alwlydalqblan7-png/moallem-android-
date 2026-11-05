@@ -13,7 +13,7 @@ const randomHex = (n = 16) => hex(crypto.getRandomValues(new Uint8Array(n)));
 const sha256 = async (text) => hex(await crypto.subtle.digest("SHA-256", encoder.encode(text)));
 const passwordHash = async (password, salt) => {
   const material = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: Uint8Array.from(salt.match(/../g), (x) => parseInt(x, 16)), iterations: 210000, hash: "SHA-256" }, material, 256);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: Uint8Array.from(salt.match(/../g), (x) => parseInt(x, 16)), iterations: 50000, hash: "SHA-256" }, material, 256);
   return hex(bits);
 };
 const same = (a, b) => {
@@ -61,7 +61,7 @@ export class SyncAccount {
     return reply({ error: "not_found" }, 404);
   }
   async register({ email, password }) {
-    if (!validEmail(email) || typeof password !== "string" || password.length < 8 || password.length > 256) return reply({ error: "invalid_credentials" }, 400);
+    if (!validEmail(email) || typeof password !== "string" || password.length < 12 || password.length > 256) return reply({ error: "invalid_credentials" }, 400);
     if (await this.state.storage.get("account")) return reply({ error: "account_exists" }, 409);
     const salt = randomHex();
     const account = { email, salt, hash: await passwordHash(password, salt), encryptionSalt: randomHex(), createdAt: new Date().toISOString() };
