@@ -169,7 +169,7 @@ const openPanel = () => {
     const emailLabel = document.createElement("label"); emailLabel.textContent = "البريد الإلكتروني"; card.append(emailLabel);
     const email = document.createElement("input"); email.type = "email"; email.autocomplete = "username"; email.placeholder = "name@example.com"; card.append(email);
     const pwLabel = document.createElement("label"); pwLabel.textContent = "كلمة المرور"; card.append(pwLabel);
-    const password = document.createElement("input"); password.type = "password"; password.autocomplete = "current-password"; password.placeholder = "8 أحرف على الأقل"; card.append(password);
+    const password = document.createElement("input"); password.type = "password"; password.autocomplete = "current-password"; password.placeholder = "12 حرفًا على الأقل"; card.append(password);
     const hint = document.createElement("p"); hint.className = "hint"; hint.textContent = "البيانات تُشفّر على جهازك قبل الإرسال. استخدم الحساب نفسه على الجوال واللابتوب. كلمة المرور لا يمكن استعادتها؛ احتفظ بها."; card.append(hint);
     const submit = async (path) => {
       submitLogin.disabled = submitRegister.disabled = true; status("جارٍ الاتصال بالحساب…");
