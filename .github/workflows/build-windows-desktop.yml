@@ -3,7 +3,7 @@ name: Build Moallem Windows App
 on:
   workflow_dispatch:
   push:
-    branches: [feature/windows-laptop-app-2026]
+    branches: [feature/windows-laptop-app-2026, feature/automatic-cloud-sync-2026-11]
     paths:
       - "src/**"
       - "public/**"
