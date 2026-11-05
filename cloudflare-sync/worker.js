@@ -71,22 +71,23 @@ export class SyncAccount {
   async login({ email, password }) {
     const account = await this.state.storage.get("account");
     if (!account || typeof password !== "string") return reply({ error: "invalid_credentials" }, 401);
-    const key = "login:" + new Date().toISOString().slice(0, 13);
-    const attempts = await this.state.storage.get(key) || 0;
-    if (attempts >= 10) return reply({ error: "try_later" }, 429);
+    const now = Date.now();
+    let attempts = await this.state.storage.get("loginAttempts") || { count: 0, startedAt: now };
+    if (now - attempts.startedAt > 60 * 60 * 1000) attempts = { count: 0, startedAt: now };
+    if (attempts.count >= 10) return reply({ error: "try_later" }, 429);
     const candidate = await passwordHash(password, account.salt);
     if (!same(candidate, account.hash)) {
-      await this.state.storage.put(key, attempts + 1, { expirationTtl: 3600 });
+      await this.state.storage.put("loginAttempts", { count: attempts.count + 1, startedAt: attempts.startedAt });
       return reply({ error: "invalid_credentials" }, 401);
     }
-    await this.state.storage.delete(key);
+    await this.state.storage.delete("loginAttempts");
     return this.issueSession(account);
   }
   async issueSession(account) {
     const token = randomHex(32);
     const tokenHash = await sha256(token);
     const expiresAt = Date.now() + 90 * 24 * 60 * 60 * 1000;
-    await this.state.storage.put("session:" + tokenHash, expiresAt, { expirationTtl: 90 * 24 * 60 * 60 });
+    await this.state.storage.put("session:" + tokenHash, expiresAt);
     return reply({ ok: true, token, expiresAt, encryptionSalt: account.encryptionSalt });
   }
   async authenticate(request) {
@@ -94,7 +95,9 @@ export class SyncAccount {
     if (!/^[a-f0-9]{64}$/.test(token)) return false;
     const hash = await sha256(token);
     const expiry = await this.state.storage.get("session:" + hash);
-    return Number(expiry) > Date.now() ? hash : false;
+    if (Number(expiry) > Date.now()) return hash;
+    if (expiry != null) await this.state.storage.delete("session:" + hash);
+    return false;
   }
   async logout(request) {
     const hash = await this.authenticate(request);
@@ -112,8 +115,8 @@ export class SyncAccount {
     const snapshot = body?.snapshot;
     if (!Number.isSafeInteger(expected) || expected !== current.version) return reply({ error: "version_conflict", ...current }, 409);
     if (!snapshot || typeof snapshot.iv !== "string" || typeof snapshot.ciphertext !== "string" ||
-        snapshot.iv.length > 128 || snapshot.ciphertext.length > MAX_CIPHERTEXT ||
-        !/^[a-f0-9]+$/i.test(snapshot.iv) || !/^[a-zA-Z0-9+/=_-]+$/.test(snapshot.ciphertext)) {
+        snapshot.iv.length < 12 || snapshot.iv.length > 32 || snapshot.ciphertext.length > MAX_CIPHERTEXT ||
+        !/^[a-zA-Z0-9+/=_-]+$/.test(snapshot.iv) || !/^[a-zA-Z0-9+/=_-]+$/.test(snapshot.ciphertext)) {
       return reply({ error: "invalid_snapshot" }, 400);
     }
     const next = { version: current.version + 1, snapshot, updatedAt: new Date().toISOString() };
