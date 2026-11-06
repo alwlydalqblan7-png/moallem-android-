@@ -53,7 +53,7 @@ import { attendanceDateKey, formatClassRoster, getDailyWidgetStatus, parseStuden
 import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
 import { calculateSciencePairSummary, calculateSubjectResult } from "./science-summary.js";
 import { buildStudentHomeworkMessage, filterHomeworkForClass, getHomeworkStatus, setHomeworkStatus, summarizeHomework } from "./homework.js";
-import { buildStudentIdentityCardHtml, buildStudentProfileHtml, collectStudentProfile } from "./student-profile.js";
+import { buildStudentIdentityCardHtml, buildStudentProfileHtml, buildStudentProfileShareText, collectStudentProfile } from "./student-profile.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const HomeWidget = registerPlugin("HomeWidget");
 const BackupFile = registerPlugin("BackupFile");
@@ -1422,6 +1422,33 @@ ${sourceExcerpt}
     if (!studentProfile) return;
     printDocument(`ملف متابعة ${profileStudent.name}`, buildStudentProfileHtml(studentProfile, schoolSettings));
   };
+  const shareStudentFullProfile = async () => {
+    if (!studentProfile || !profileStudent) return;
+    const text = buildStudentProfileShareText(studentProfile, schoolSettings);
+    const title = `بطاقة الطالب الكاملة — ${profileStudent.name}`;
+    try {
+      if (Capacitor.isNativePlatform()) {
+        await ShareText.shareProfile({
+          text,
+          title,
+          photo: profileStudent.photo || "",
+          fileName: `student-${String(profileStudent.id).replace(/[^a-zA-Z0-9_-]/g, "")}.jpg`,
+        });
+      } else if (profileStudent.photo && navigator.share && navigator.canShare && typeof File === "function") {
+        const response = await fetch(profileStudent.photo);
+        const photoFile = new File([await response.blob()], `student-${profileStudent.id}.jpg`, { type: "image/jpeg" });
+        const payload = { title, text, files: [photoFile] };
+        if (navigator.canShare({ files: payload.files })) await navigator.share(payload);
+        else await shareText(text, title);
+      } else {
+        await shareText(text, title);
+      }
+      setStudentPhotoMessage("تم فتح خيارات المشاركة؛ أرفق التطبيق صورة الطالب مع تفاصيل ملفه.");
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      setStudentPhotoMessage(error?.message || "تعذرت مشاركة بطاقة الطالب كاملة.");
+    }
+  };
   const shareStudentProfileHomework = () => {
     if (!studentProfile) return;
     shareText(buildStudentHomeworkMessage({
@@ -2020,6 +2047,7 @@ ${sourceExcerpt}
                     <button type="button" onClick={() => studentPhotoInputRef.current?.click()}><Camera size={16}/>{profileStudent.photo ? "تغيير الصورة" : "إضافة صورة"}</button>
                     {profileStudent.photo && <button type="button" className="danger" onClick={removeStudentPhoto}>حذف الصورة</button>}
                     <button type="button" onClick={printStudentIdentityCard}><PrinterIcon size={16}/> طباعة البطاقة</button>
+                    <button type="button" onClick={shareStudentFullProfile}><Share2 size={16}/> مشاركة البطاقة كاملة</button>
                   </div>
                 </div>
                 {studentPhotoMessage && <p className="note" role="status">{studentPhotoMessage}</p>}
