@@ -107,7 +107,7 @@ export function buildStudentProfileShareText(profile, school = {}) {
     "",
     "العلامات والمحصلات:",
     ...(grades.length ? grades.flatMap(item => [
-      `• ${item.subject}: المحصلة ${item.value}/${item.maximum || "—"}${item.pendingExam ? " (بانتظار الامتحان)" : ""}`,
+      `• ${item.subject}: ${item.value}/${item.maximum || "—"} (المحصلة)${item.pendingExam ? " (بانتظار الامتحان)" : ""}`,
       ...(item.assessments || []).map(mark => `  - ${mark.name}: ${mark.value}/${mark.maximum || "—"}`),
     ]) : ["• لا توجد علامات محفوظة"]),
     "",
