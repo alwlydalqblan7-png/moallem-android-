@@ -17,11 +17,16 @@ export function collectStudentProfile({
     .map(([key, book]) => {
       const subject = key.slice(classPrefix.length);
       const result = calculateSubjectResult(book, student.id, officialGradeMaximum(student.grade, subject));
+      const studentMarks = book.marks?.[student.id] || book.marks?.[String(student.id)] || {};
+      const assessments = book.columns
+        .filter(column => studentMarks[column.id] !== "" && studentMarks[column.id] != null)
+        .map(column => ({ name: column.name || column.type || "درجة", value: studentMarks[column.id], maximum: column.max }));
       return {
         subject,
         value: result.value ?? result.earned ?? 0,
         maximum: result.maximum ?? 0,
         pendingExam: Boolean(result.pendingExam),
+        assessments,
       };
     });
   const attendance = Object.entries(attendanceHistory || {})
@@ -66,7 +71,7 @@ export function buildStudentProfileHtml(profile, school = {}) {
     ? `<img class="profile-photo" src="${escapeHtml(student.photo)}" alt="صورة الطالب">`
     : "";
   const gradeRows = grades.length
-    ? grades.map((item) => `<tr><td>${escapeHtml(item.subject)}</td><td>${escapeHtml(item.value)}</td><td>${escapeHtml(item.maximum || "—")}</td><td>${item.pendingExam ? "بانتظار الامتحان" : "—"}</td></tr>`).join("")
+    ? grades.map((item) => `<tr><td>${escapeHtml(item.subject)}${item.assessments?.length ? `<br><small>${item.assessments.map(mark => `${escapeHtml(mark.name)}: ${escapeHtml(mark.value)}/${escapeHtml(mark.maximum || "—")}`).join(" · ")}</small>` : ""}</td><td>${escapeHtml(item.value)}</td><td>${escapeHtml(item.maximum || "—")}</td><td>${item.pendingExam ? "بانتظار الامتحان" : "—"}</td></tr>`).join("")
     : '<tr><td colspan="4">لا توجد علامات محفوظة</td></tr>';
   const attendanceRows = attendance.length
     ? attendance.map((item) => `<tr><td>${escapeHtml(item.date)}</td><td>${item.status === "present" ? "حاضر" : item.status === "absent" ? "غائب" : "متأخر"}</td><td>${escapeHtml(item.note || "—")}</td></tr>`).join("")
@@ -101,7 +106,10 @@ export function buildStudentProfileShareText(profile, school = {}) {
     `رقم الطالب: ${student.id}`,
     "",
     "العلامات والمحصلات:",
-    ...(grades.length ? grades.map(item => `• ${item.subject}: ${item.value}/${item.maximum || "—"}${item.pendingExam ? " (بانتظار الامتحان)" : ""}`) : ["• لا توجد علامات محفوظة"]),
+    ...(grades.length ? grades.flatMap(item => [
+      `• ${item.subject}: المحصلة ${item.value}/${item.maximum || "—"}${item.pendingExam ? " (بانتظار الامتحان)" : ""}`,
+      ...(item.assessments || []).map(mark => `  - ${mark.name}: ${mark.value}/${mark.maximum || "—"}`),
+    ]) : ["• لا توجد علامات محفوظة"]),
     "",
     `الحضور: ${attendanceSummary.present || 0} يوم | الغياب: ${attendanceSummary.absent || 0} يوم | التأخر: ${attendanceSummary.late || 0} يوم`,
     "سجل الحضور والغياب:",
