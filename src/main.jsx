@@ -47,7 +47,7 @@ import moallemIcon from "./assets/moallem-icon.png";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { autoColorHtml, mergeSubjectOptions } from "./preparation-format.js";
-import { validateMoallemBackup } from "./backup-format.js";
+import { extractStudentPhotos, validateMoallemBackup } from "./backup-format.js";
 import { inspectDaftarBackup } from "./legacy-backup-inspector.js";
 import { attendanceDateKey, formatClassRoster, getDailyWidgetStatus, parseStudentNames, summarizeAttendance } from "./student-tools.js";
 import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
@@ -406,17 +406,19 @@ function App() {
         const key = localStorage.key(i);
         if (key?.startsWith("m2_")) data[key] = localStorage.getItem(key);
       }
+      const photoBackup = extractStudentPhotos(data);
       const pdfs = await Promise.all((await listPdfBlobs()).map(async ({ id, blob }) => ({
         id, data: await blobToDataUrl(blob),
       })));
       const payload = JSON.stringify({
-        format: "moallem-backup-v2", createdAt: new Date().toISOString(), data, pdfs,
+        format: "moallem-backup-v3", createdAt: new Date().toISOString(),
+        data: photoBackup.data, photos: photoBackup.photos, pdfs,
       });
       const filename = "moallem-backup-" + new Date().toISOString().slice(0, 10) + ".json";
       if (Capacitor.isNativePlatform()) {
         try {
           await BackupFile.save({ filename, content: payload });
-          window.alert("تم حفظ النسخة الاحتياطية بنجاح في المكان الذي اخترته.");
+          window.alert(`تم حفظ النسخة الاحتياطية، وتشمل ${photoBackup.photos.length} صورة طالب، في المكان الذي اخترته.`);
         } catch (error) {
           if (String(error?.message || error).includes("CANCELLED")) return;
           window.alert("تعذر حفظ النسخة: " + (error?.message || error));
@@ -432,7 +434,7 @@ function App() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-      window.alert("تم طلب تنزيل النسخة. تأكد من وجود ملف " + filename + " في التنزيلات؛ لا تعتبر النسخ ناجحًا قبل التأكد.");
+      window.alert(`تم طلب تنزيل النسخة التي تشمل ${photoBackup.photos.length} صورة طالب. تأكد من وجود ملف ${filename} في التنزيلات؛ لا تعتبر النسخ ناجحًا قبل التأكد.`);
     } catch (err) {
       window.alert("فشل إنشاء النسخة الاحتياطية: " + (err?.message || "خطأ غير معروف"));
     }
@@ -444,11 +446,11 @@ function App() {
       const validated = validateMoallemBackup(backup);
       const entries = Object.entries(validated.data);
       if (!entries.length) throw new Error("النسخة لا تحتوي بيانات معلّم");
-      if (!window.confirm(`ستستبدل البيانات التي تحمل المفاتيح نفسها${backup.format === "moallem-backup-v2" ? `، وستستبدل مكتبة PDF بـ ${validated.pdfs.length} ملف` : ""}. احفظ نسخة احتياطية مستقلة قبل المتابعة. هل تريد الاستعادة؟`)) return;
+      if (!window.confirm(`ستستبدل البيانات التي تحمل المفاتيح نفسها${["moallem-backup-v2", "moallem-backup-v3"].includes(backup.format) ? `، وستستبدل مكتبة PDF بـ ${validated.pdfs.length} ملف` : ""}. احفظ نسخة احتياطية مستقلة قبل المتابعة. هل تريد الاستعادة؟`)) return;
       const previousValues = Object.fromEntries(entries.map(([key]) => [key, localStorage.getItem(key)]));
-      const previousPdfs = backup.format === "moallem-backup-v2" ? await listPdfBlobs() : null;
+      const previousPdfs = ["moallem-backup-v2", "moallem-backup-v3"].includes(backup.format) ? await listPdfBlobs() : null;
       try {
-        if (backup.format === "moallem-backup-v2") await replaceDecodedPdfBlobs(validated.pdfs);
+        if (["moallem-backup-v2", "moallem-backup-v3"].includes(backup.format)) await replaceDecodedPdfBlobs(validated.pdfs);
         for (const [key, value] of entries) localStorage.setItem(key, value);
       } catch (writeError) {
         let rollbackError = null;
