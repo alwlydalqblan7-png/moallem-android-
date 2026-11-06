@@ -62,7 +62,7 @@ const escapeHtml = (value) => String(value ?? "")
 export function buildStudentProfileHtml(profile, school = {}) {
   if (!profile?.student) throw new Error("ملف الطالب غير متوفر");
   const { student, grades = [], attendance = [], attendanceSummary = {}, homework = [], notes = [], legacyStatus = "" } = profile;
-  const photoHtml = /^data:image\\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(String(student.photo || ""))
+  const photoHtml = /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(String(student.photo || ""))
     ? `<img class="profile-photo" src="${escapeHtml(student.photo)}" alt="صورة الطالب">`
     : "";
   const gradeRows = grades.length
