@@ -114,7 +114,7 @@ export function buildStudentProfileShareText(profile, school = {}) {
     "ملاحظات المعلم:",
     ...(notes.length ? notes.map(item => `• ${item.createdAt ? String(item.createdAt).slice(0, 10) : "بلا تاريخ"}: ${item.text}`) : ["• لا توجد ملاحظات مسجلة"]),
   ];
-  return lines.filter((line, index) => line !== "" || lines[index - 1] !== "").join("\\n").trim();
+  return lines.filter((line, index) => line !== "" || lines[index - 1] !== "").join("\n").trim();
 }
 
 export function buildStudentIdentityCardHtml(student, school = {}) {
