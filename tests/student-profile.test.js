@@ -89,12 +89,12 @@ test("full student share includes photo-ready identity, all grades, attendance a
   };
   const html = buildStudentProfileHtml(profile, { school: "ثانوية الشافعي" });
   const text = buildStudentProfileShareText(profile, { school: "ثانوية الشافعي", teacher: "الوليد" });
-  assert.match(html, /data:image\\/jpeg;base64,AAAA/);
-  assert.match(text, /العلوم: 165\\/200/);
-  assert.match(text, /الحضور: 12 يوم \\| الغياب: 2 يوم \\| التأخر: 1 يوم/);
+  assert.ok(html.includes("data:image/jpeg;base64,AAAA"));
+  assert.ok(text.includes("العلوم: 165/200"));
+  assert.ok(text.includes("الحضور: 12 يوم | الغياب: 2 يوم | التأخر: 1 يوم"));
   assert.match(text, /2026-10-20: غائب — غياب بعذر/);
   assert.match(text, /أسئلة الوحدة/);
   assert.match(text, /تحسن في المشاركة/);
   assert.match(text, /يرجى متابعة الواجب/);
-  assert.doesNotMatch(text, /\\\\n/);
+  assert.ok(!text.includes("\\\\n"));
 });
