@@ -79,7 +79,7 @@ const appBuildPath = "android/app/build.gradle";
 let appBuild = readFileSync(appBuildPath, "utf8");
 const debugSuffix = process.env.MOALLEM_DEBUG_APP_ID_SUFFIX || ".test";
 if (!/^\.[A-Za-z0-9.]+$/.test(debugSuffix)) throw new Error("MOALLEM_DEBUG_APP_ID_SUFFIX must begin with a dot and contain only letters, digits, or dots");
-const debugLabel = (process.env.MOALLEM_DEBUG_APP_LABEL || "معلّم تجريبي 2026-2027").replaceAll('"', "");
+const debugLabel = (process.env.MOALLEM_DEBUG_APP_LABEL || "معلّم").replaceAll('"', "");
 if (!appBuild.includes("applicationIdSuffix")) {
   appBuild = appBuild.replace("buildTypes {", `buildTypes {\n        debug {\n            // Install test builds beside production without touching its app data.\n            applicationIdSuffix "${debugSuffix}"\n        }`);
 } else {
