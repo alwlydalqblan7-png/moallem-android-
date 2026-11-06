@@ -9,6 +9,44 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "ShareText")
 public class ShareTextPlugin extends Plugin {
     @PluginMethod
+    public void shareProfile(PluginCall call) {
+        String text = call.getString("text", "");
+        String title = call.getString("title", "بطاقة متابعة الطالب");
+        String photo = call.getString("photo", "");
+        if (text.trim().isEmpty()) {
+            call.reject("لا توجد تفاصيل لمشاركتها");
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        intent.putExtra(Intent.EXTRA_TEXT, text);
+        if (photo.matches("^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$")) {
+            try {
+                int comma = photo.indexOf(',');
+                byte[] imageBytes = Base64.decode(photo.substring(comma + 1), Base64.DEFAULT);
+                File shareDir = new File(getContext().getCacheDir(), "student-share");
+                if (!shareDir.exists() && !shareDir.mkdirs()) throw new IllegalStateException("تعذر تجهيز صورة المشاركة");
+                File image = new File(shareDir, "student-" + System.currentTimeMillis() + ".jpg");
+                try (FileOutputStream output = new FileOutputStream(image)) {
+                    output.write(imageBytes);
+                    output.flush();
+                }
+                Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", image);
+                intent.setType("image/jpeg");
+                intent.putExtra(Intent.EXTRA_STREAM, uri);
+                intent.setClipData(ClipData.newUri(getContext().getContentResolver(), title, uri));
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception error) {
+                call.reject("تعذرت إضافة صورة الطالب للمشاركة: " + error.getMessage(), error);
+                return;
+            }
+        } else {
+            intent.setType("text/plain");
+        }
+        getActivity().startActivity(Intent.createChooser(intent, title));
+        call.resolve();
+    }
+
+    @PluginMethod
     public void share(PluginCall call) {
         String text = call.getString("text", "");
         String title = call.getString("title", "مشاركة من معلّم");
