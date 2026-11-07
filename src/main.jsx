@@ -692,7 +692,14 @@ function App() {
     () => students.filter((s) => s.grade === grade && s.section === section),
     [students, grade, section],
   );
-  const profileStudent = students.find((student) => String(student.id) === String(profileStudentId)) || null;
+  const selectedProfileStudent = students.find((student) => String(student.id) === String(profileStudentId)) || null;
+  const profileRoster = selectedProfileStudent
+    ? students.filter((student) => student.grade === selectedProfileStudent.grade && student.section === selectedProfileStudent.section)
+    : [];
+  const profileStudent = selectedProfileStudent ? {
+    ...selectedProfileStudent,
+    studentNumber: profileRoster.findIndex((student) => String(student.id) === String(selectedProfileStudent.id)) + 1,
+  } : null;
   const studentProfile = useMemo(() => profileStudent ? collectStudentProfile({
     student: profileStudent, gradebooks, attendanceHistory, homeworkItems, notes: studentNotes, officialGradeMaximum, legacyAttendance: attendance,
   }) : null, [profileStudent, gradebooks, attendanceHistory, homeworkItems, studentNotes, attendance]);
@@ -2046,7 +2053,7 @@ ${sourceExcerpt}
                     <span className="eyebrow">بطاقة الطالب · متابعة خاصة</span>
                     <h2>{profileStudent.name}</h2>
                     <p>{profileStudent.grade} — الشعبة {profileStudent.section}</p>
-                    <small>رقم الطالب: {profileStudent.id}</small>
+                    <small>رقم الطالب: {profileStudent.studentNumber}</small>
                   </div>
                   <input ref={studentPhotoInputRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={saveStudentPhoto} />
                   <div className="actions student-id-actions">
