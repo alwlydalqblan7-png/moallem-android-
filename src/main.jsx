@@ -97,6 +97,9 @@ const DEFAULT_SUBJECTS = [
 ];
 const ADDED_SUBJECTS = ["العلوم", "الفيزياء والكيمياء"];
 const FIRST_TERM_TEACHER_SUBJECTS = new Set(["علم الأحياء", "الإحصاء", "المعلوماتية", "العلوم", "الفيزياء والكيمياء"]);
+const firstTermColumnsForSubject = (maximum, subjectName) => createFirstTermColumns(maximum).map((column) =>
+  subjectName === "الإحصاء" && column.id === "term1_quiz" ? { ...column, name: "مذاكرة خطية" } : column
+);
 const seedStudents = [
   { id: 1, name: "أحمد محمد", grade: "السابع", section: "أ" },
   { id: 2, name: "سارة خالد", grade: "السابع", section: "أ" },
@@ -718,11 +721,12 @@ function App() {
   );
   const bookKey = `${grade}|${section}|${subject}`;
   const defaultSubjectMaximum = officialGradeMaximum(grade, subject) || 100;
+  const isStatisticsSubject = subject === "الإحصاء";
   const usesFirstTermScheme = FIRST_TERM_TEACHER_SUBJECTS.has(subject);
   const book = gradebooks[bookKey] || {
     gradingScheme: usesFirstTermScheme ? FIRST_TERM_SCHEME_ID : undefined,
     gradingMaximum: defaultSubjectMaximum,
-    columns: usesFirstTermScheme ? createFirstTermColumns(defaultSubjectMaximum) : officialGradeColumns(grade, subject) || seedColumns,
+    columns: usesFirstTermScheme ? firstTermColumnsForSubject(defaultSubjectMaximum, subject) : officialGradeColumns(grade, subject) || seedColumns,
     marks: {},
   };
   const updateBook = (next) =>
@@ -744,7 +748,7 @@ function App() {
       window.alert("هذا الدفتر يحتوي على علامات محفوظة. لم نغيّرها. أنشئ نسخة احتياطية أولًا، ثم انقل العلامات يدويًا إلى الأعمدة الجديدة لتجنب تغيير درجات الطلاب.");
       return;
     }
-    updateBook({ ...book, gradingScheme: FIRST_TERM_SCHEME_ID, gradingMaximum: defaultSubjectMaximum, columns: createFirstTermColumns(defaultSubjectMaximum), marks: book.marks || {} });
+    updateBook({ ...book, gradingScheme: FIRST_TERM_SCHEME_ID, gradingMaximum: defaultSubjectMaximum, columns: firstTermColumnsForSubject(defaultSubjectMaximum, subject), marks: book.marks || {} });
   };
   const addColumn = () =>
     updateBook({
@@ -1646,15 +1650,15 @@ ${sourceExcerpt}
     }
   };
   const buildGradebookHtml = () => {
-    const heads = book.columns.map((c) => `<th>${c.name}<br><small>/${c.max}</small></th>`).join("");
-    const courseworkHead = firstTermScheme ? `<th>محصلة الفصل الأول /${firstTermMaximum}</th>` : split200 && finalExamColumn ? `<th>درجة الأعمال /${officialMax}</th>` : "";
+    const heads = book.columns.map((c) => `<th>${isStatisticsSubject && c.id === "term1_quiz" ? "مذاكرة خطية" : c.name}<br><small>/${c.max}</small></th>`).join("");
+    const courseworkHead = firstTermScheme ? `<th>${isStatisticsSubject ? "درجة عمل الفصل الأول" : "محصلة الفصل الأول"} /${firstTermMaximum}</th>` : split200 && finalExamColumn ? `<th>درجة الأعمال /${officialMax}</th>` : "";
     const rows = classStudents.map((s, i) => {
       const c = calc(s);
       const coursework = c.split ? `<td>${c.works}/${c.firstTerm ? firstTermMaximum : officialMax}</td>` : "";
       const final = c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`;
       return `<tr><td>${i + 1}</td><td>${s.name}</td>${book.columns.map((col) => `<td>${book.marks[s.id]?.[col.id] ?? ""}</td>`).join("")}${coursework}<td>${final}</td><td>${c.pct}%</td></tr>`;
     }).join("");
-    const finalHead = split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `العلامة النهائية /${firstTermMaximum}` : "المجموع";
+    const finalHead = split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `${isStatisticsSubject ? "محصلة الفصل الأول" : "العلامة النهائية"} /${firstTermMaximum}` : "المجموع";
     return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px}h1,h2{text-align:center}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #333;padding:7px;text-align:center}</style></head><body><h1>دفتر العلامات</h1><h2>${grade} — الشعبة ${section}</h2><p>المادة: ${subject}</p><table><tr><th>#</th><th>اسم الطالب</th>${heads}${courseworkHead}<th>${finalHead}</th><th>النسبة</th></tr>${rows}</table></body></html>`;
   };
   const buildReportCardsHtml = () => {
@@ -2296,15 +2300,15 @@ ${sourceExcerpt}
                               </div>
                             ) : (
                               <>
-                                {c.name}
+                                {isStatisticsSubject && c.id === "term1_quiz" ? "مذاكرة خطية" : c.name}
                                 <small>/{c.max}</small>
                               </>
                             )}
                           </th>
                         ))}
                         {split200 && finalExamColumn && <th>درجة الأعمال /{officialMax}</th>}
-                        {firstTermScheme && <th>محصلة الفصل الأول /{firstTermMaximum}</th>}
-                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `العلامة النهائية /${firstTermMaximum}` : "المجموع"}</th>
+                        {firstTermScheme && <th>{isStatisticsSubject ? "درجة عمل الفصل الأول" : "محصلة الفصل الأول"} /{firstTermMaximum}</th>}
+                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `${isStatisticsSubject ? "محصلة الفصل الأول" : "العلامة النهائية"} /${firstTermMaximum}` : "المجموع"}</th>
                         <th>النسبة</th>
                         {showSciencePairSummary && <>
                           <th>محصلة العلوم</th>
