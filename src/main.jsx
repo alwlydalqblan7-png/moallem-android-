@@ -51,6 +51,7 @@ import { extractStudentPhotos, validateMoallemBackup } from "./backup-format.js"
 import { inspectDaftarBackup } from "./legacy-backup-inspector.js";
 import { attendanceDateKey, formatClassRoster, getDailyWidgetStatus, parseStudentNames, summarizeAttendance } from "./student-tools.js";
 import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
+import { formatGradeInArabicWords } from "./arabic-grade-words.js";
 import { calculateSciencePairSummary, calculateSubjectResult } from "./science-summary.js";
 import { buildStudentHomeworkMessage, filterHomeworkForClass, getHomeworkStatus, setHomeworkStatus, summarizeHomework } from "./homework.js";
 import { buildStudentIdentityCardHtml, buildStudentProfileHtml, buildStudentProfileShareText, collectStudentProfile } from "./student-profile.js";
@@ -1658,15 +1659,20 @@ ${sourceExcerpt}
   };
   const buildGradebookHtml = () => {
     const heads = book.columns.map((c) => `<th>${isStatisticsSubject && c.id === "term1_quiz" ? "مذاكرة خطية" : c.name}<br><small>/${c.max}</small></th>`).join("");
-    const courseworkHead = firstTermScheme ? `<th>${isStatisticsSubject ? "درجة عمل الفصل الأول" : "محصلة الفصل الأول"} /${firstTermMaximum}</th>` : split200 && finalExamColumn ? `<th>درجة الأعمال /${officialMax}</th>` : "";
+    const courseworkHead = firstTermScheme ? `<th>درجة أعمال الفصل الأول /${firstTermMaximum}</th>` : split200 && finalExamColumn ? `<th>درجة الأعمال /${officialMax}</th>` : "";
     const rows = classStudents.map((s, i) => {
       const c = calc(s);
       const coursework = c.split ? `<td>${c.works}/${c.firstTerm ? firstTermMaximum : officialMax}</td>` : "";
       const final = c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`;
-      return `<tr><td>${i + 1}</td><td>${s.name}</td>${book.columns.map((col) => `<td>${book.marks[s.id]?.[col.id] ?? ""}</td>`).join("")}${coursework}<td>${final}</td><td>${c.pct}%</td></tr>`;
+      const finalValue = c.final == null && c.split ? null : c.got;
+      const failing = finalValue != null && c.max > 0 && finalValue < c.max / 2;
+      const failClass = failing ? ' class="failing-mark"' : "";
+      const written = finalValue == null ? "—" : formatGradeInArabicWords(finalValue);
+      const pair = showSciencePairSummary ? calculateSciencePairSummary(gradebooks, grade, section, s.id, officialGradeMaximum) : null;
+      return `<tr><td>${i + 1}</td><td>${s.name}</td>${book.columns.map((col) => `<td>${book.marks[s.id]?.[col.id] ?? ""}</td>`).join("")}${coursework}<td${failClass}>${final}</td><td>${c.pct}%</td>${pair ? `<td>${pair.science ?? "—"}</td><td>${pair.physicsChemistry ?? "—"}</td><td>${pair.total ?? "—"}</td>` : ""}<td${failClass}>${written}</td></tr>`;
     }).join("");
-    const finalHead = split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `${isStatisticsSubject ? "محصلة الفصل الأول" : "العلامة النهائية"} /${firstTermMaximum}` : "المجموع";
-    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px}h1,h2{text-align:center}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #333;padding:7px;text-align:center}</style></head><body><h1>دفتر العلامات</h1><h2>${grade} — الشعبة ${section}</h2><p>المادة: ${subject}</p><table><tr><th>#</th><th>اسم الطالب</th>${heads}${courseworkHead}<th>${finalHead}</th><th>النسبة</th></tr>${rows}</table></body></html>`;
+    const finalHead = split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `محصلة الفصل الأول /${firstTermMaximum}` : "المجموع";
+    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px}h1,h2{text-align:center}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #333;padding:7px;text-align:center}.failing-mark{color:#c62828;text-decoration:underline;text-decoration-color:#c62828;text-decoration-thickness:2px}</style></head><body><h1>دفتر العلامات</h1><h2>${grade} — الشعبة ${section}</h2><p>المادة: ${subject}</p><table><tr><th>#</th><th>اسم الطالب</th>${heads}${courseworkHead}<th>${finalHead}</th><th>النسبة</th>${showSciencePairSummary ? "<th>محصلة العلوم</th><th>محصلة الفيزياء والكيمياء</th><th>مجموع المحصلتين</th>" : ""}<th>كتابة</th></tr>${rows}</table></body></html>`;
   };
   const buildReportCardsHtml = () => {
     const cards = classStudents
@@ -2314,14 +2320,15 @@ ${sourceExcerpt}
                           </th>
                         ))}
                         {split200 && finalExamColumn && <th>درجة الأعمال /{officialMax}</th>}
-                        {firstTermScheme && <th>{isStatisticsSubject ? "درجة عمل الفصل الأول" : "محصلة الفصل الأول"} /{firstTermMaximum}</th>}
-                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `${isStatisticsSubject ? "محصلة الفصل الأول" : "العلامة النهائية"} /${firstTermMaximum}` : "المجموع"}</th>
+                        {firstTermScheme && <th>درجة أعمال الفصل الأول /{firstTermMaximum}</th>}
+                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `محصلة الفصل الأول /${firstTermMaximum}` : "المجموع"}</th>
                         <th>النسبة</th>
                         {showSciencePairSummary && <>
                           <th>محصلة العلوم</th>
                           <th>محصلة الفيزياء والكيمياء</th>
                           <th>مجموع المحصلتين</th>
                         </>}
+                        <th>كتابة</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2330,6 +2337,8 @@ ${sourceExcerpt}
                         const pair = showSciencePairSummary
                           ? calculateSciencePairSummary(gradebooks, grade, section, s.id, officialGradeMaximum)
                           : null;
+                        const finalValue = c.final == null && c.split ? null : c.got;
+                        const failing = finalValue != null && c.max > 0 && finalValue < c.max / 2;
                         return (
                           <tr key={s.id}>
                             <td>{i + 1}</td>
@@ -2350,7 +2359,7 @@ ${sourceExcerpt}
                             {c.split && <td><b>{c.works}/{c.firstTerm ? firstTermMaximum : officialMax}</b></td>}
                             <td>
                               <b>
-                                {c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`}
+                                <span className={failing ? "failing-mark" : ""}>{c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`}</span>
                               </b>
                             </td>
                             <td>
@@ -2361,6 +2370,7 @@ ${sourceExcerpt}
                               <td><b>{pair.physicsChemistry ?? "—"}</b></td>
                               <td><b>{pair.total ?? "—"}</b></td>
                             </>}
+                            <td><b className={failing ? "failing-mark" : ""}>{finalValue == null ? "—" : formatGradeInArabicWords(finalValue)}</b></td>
                           </tr>
                         );
                       })}
