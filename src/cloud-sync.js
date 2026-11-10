@@ -1,4 +1,4 @@
-const API = import.meta.env.VITE_SYNC_API_URL || "";
+const API = import.meta.env.VITE_SYNC_API_URL || "https://moallem-sync.liondangerous65.workers.dev";
 const PREFIX = "m2_";
 const ACCOUNT_KEY = "moallem.sync.account";
 const DB_NAME = "moallem_cloud_sync";
@@ -175,13 +175,25 @@ const openPanel = () => {
       submitLogin.disabled = submitRegister.disabled = true; status("جارٍ الاتصال بالحساب…");
       try {
         const cleanEmail = email.value.trim().toLowerCase(), pass = password.value;
+        if (!/^[^\s@]{1,80}@[A-Za-z0-9.-]{1,120}\.[A-Za-z]{2,40}$/.test(cleanEmail)) throw new Error("أدخل بريدًا إلكترونيًا صحيحًا.");
+        if (pass.length < 12 || pass.length > 256) throw new Error("يجب أن تتكون كلمة المرور من 12 إلى 256 حرفًا.");
         if (!navigator.onLine) throw new Error("اتصل بالإنترنت لإعداد المزامنة أول مرة.");
-        const result = await api(path, "POST", { email: cleanEmail, password: pass }, false);
+        let result;
+        try { result = await api(path, "POST", { email: cleanEmail, password: pass }, false); }
+        catch (e) {
+          if (path !== "/api/register" || e.code !== "account_exists") throw e;
+          result = await api("/api/login", "POST", { email: cleanEmail, password: pass }, false);
+        }
         account = { email: cleanEmail, token: result.token, version: 0 };
         cryptoKey = await deriveKey(pass, result.encryptionSalt);
         await localPut("key:" + account.email, cryptoKey); saveAccount(); baseline = null;
         closeDialog(); render(); await synchronize();
-      } catch (e) { statusText.textContent = e.code === "account_exists" ? "الحساب موجود؛ استخدم تسجيل الدخول." : (e.code === "invalid_credentials" ? "تعذر تسجيل الدخول؛ تحقق من البريد وكلمة المرور." : e.message); }
+      } catch (e) {
+        const message = e.code === "account_exists" ? "هذا البريد مسجل سابقًا. سجّل الدخول بكلمة المرور نفسها." :
+          e.code === "invalid_credentials" ? (path === "/api/register" ? "تعذر إنشاء الحساب. تحقق من البريد وكلمة المرور (12 حرفًا على الأقل)." : "تعذر تسجيل الدخول؛ تحقق من البريد وكلمة المرور.") :
+          e.code === "snapshot_too_large" ? "حجم البيانات كبير للمزامنة. أنشئ نسخة احتياطية للصور واحذف الصور الكبيرة ثم أعد المحاولة." : e.message;
+        statusText.textContent = message;
+      }
       finally { submitLogin.disabled = submitRegister.disabled = false; }
     };
     const submitLogin = document.createElement("button"); submitLogin.textContent = "تسجيل الدخول"; submitLogin.onclick = () => submit("/api/login"); card.append(submitLogin);

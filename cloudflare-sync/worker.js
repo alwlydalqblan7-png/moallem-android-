@@ -23,7 +23,7 @@ const same = (a, b) => {
 };
 const validEmail = (email) => /^[^\s@]{1,80}@[^\s@]{1,120}\.[^\s@]{2,40}$/.test(email);
 const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
-const MAX_CIPHERTEXT = 2_000_000;
+const MAX_CIPHERTEXT = 1_400_000;
 
 export default {
   async fetch(request, env) {
@@ -115,10 +115,11 @@ export class SyncAccount {
     const snapshot = body?.snapshot;
     if (!Number.isSafeInteger(expected) || expected !== current.version) return reply({ error: "version_conflict", ...current }, 409);
     if (!snapshot || typeof snapshot.iv !== "string" || typeof snapshot.ciphertext !== "string" ||
-        snapshot.iv.length < 12 || snapshot.iv.length > 32 || snapshot.ciphertext.length > MAX_CIPHERTEXT ||
+        snapshot.iv.length < 12 || snapshot.iv.length > 32 ||
         !/^[a-zA-Z0-9+/=_-]+$/.test(snapshot.iv) || !/^[a-zA-Z0-9+/=_-]+$/.test(snapshot.ciphertext)) {
       return reply({ error: "invalid_snapshot" }, 400);
     }
+    if (snapshot.ciphertext.length > MAX_CIPHERTEXT) return reply({ error: "snapshot_too_large" }, 413);
     const next = { version: current.version + 1, snapshot, updatedAt: new Date().toISOString() };
     await this.state.storage.put("snapshot", next);
     return reply(next);

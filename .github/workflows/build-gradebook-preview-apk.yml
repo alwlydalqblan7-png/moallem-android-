@@ -2,7 +2,7 @@ name: Build Moallem Merged APK for Data Migration
 
 on:
   push:
-    branches: [feature/gradebook-written-totals-2026, feature/automatic-cloud-sync-2026-11]
+    branches: [feature/gradebook-written-totals-2026, feature/automatic-cloud-sync-2026-11, feature/fix-sync-account-backup-2026]
   workflow_dispatch:
 
 jobs:

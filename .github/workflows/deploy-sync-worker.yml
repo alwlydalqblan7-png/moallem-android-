@@ -3,7 +3,7 @@ name: Deploy Moallem Sync Worker
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/automatic-cloud-sync-2026-11]
+    branches: [main, feature/automatic-cloud-sync-2026-11, feature/fix-sync-account-backup-2026]
     paths:
       - "cloudflare-sync/**"
       - ".github/workflows/deploy-sync-worker.yml"
