@@ -1,8 +1,8 @@
-name: Build Moallem Gradebook Preview APK
+name: Build Moallem Merged APK for Data Migration
 
 on:
   push:
-    branches: [feature/gradebook-written-totals-2026]
+    branches: [feature/gradebook-written-totals-2026, feature/automatic-cloud-sync-2026-11]
   workflow_dispatch:
 
 jobs:
@@ -32,13 +32,15 @@ jobs:
         run: npx @capacitor/assets generate --android --iconBackgroundColor '#1C3F66' --iconBackgroundColorDark '#1C3F66' --splashBackgroundColor '#1C3F66' --splashBackgroundColorDark '#1C3F66'
       - name: Sync Capacitor
         run: npx cap sync android
-      - name: Configure isolated preview package
+      - name: Configure unified package for data migration
         env:
           MOALLEM_DEBUG_APP_ID_SUFFIX: .gradebookwritten
           MOALLEM_DEBUG_APP_LABEL: معلّم
           MOALLEM_VERSION_CODE: ${{ github.run_number }}
           MOALLEM_VERSION_NAME: 2026.2027.${{ github.run_number }}
-        run: node scripts/prepare-android.mjs
+        run: |
+          node scripts/prepare-android.mjs
+          sed -i '/applicationIdSuffix/d' android/app/build.gradle
       - name: Build Debug APK
         working-directory: android
         run: |
@@ -47,7 +49,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Moallem-Gradebook-Preview-APK
+          name: Moallem-Merged-Data-Migration-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
