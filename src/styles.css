@@ -97,6 +97,7 @@ main{padding:14px;max-width:1100px;margin:auto}
 .gradebook .namecol{position:sticky;right:0;background:#fff;min-width:150px;text-align:right;z-index:2}
 .gradebook th.namecol{background:#f7fafc;z-index:3}
 .gradebook small{display:block;color:var(--muted)}
+.failing-mark{color:#c62828;text-decoration:underline;text-decoration-color:#c62828;text-decoration-thickness:2px}
 .mark{width:72px;text-align:center;padding:8px!important}
 .coledit{display:grid;gap:5px}
 .coledit input{width:92px;padding:6px!important}

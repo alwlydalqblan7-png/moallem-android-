@@ -1,0 +1,53 @@
+name: Build Moallem Gradebook Preview APK
+
+on:
+  push:
+    branches: [feature/gradebook-written-totals-2026]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build web app
+        env:
+          VITE_AI_API_URL: https://moallem-ai.liondangerous65.workers.dev/api/ai
+        run: npm run build
+      - name: Create Android project
+        run: test -d android || npx cap add android
+      - name: Generate Android icons
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#1C3F66' --iconBackgroundColorDark '#1C3F66' --splashBackgroundColor '#1C3F66' --splashBackgroundColorDark '#1C3F66'
+      - name: Sync Capacitor
+        run: npx cap sync android
+      - name: Configure isolated preview package
+        env:
+          MOALLEM_DEBUG_APP_ID_SUFFIX: .gradebookwritten
+          MOALLEM_DEBUG_APP_LABEL: معلّم
+          MOALLEM_VERSION_CODE: ${{ github.run_number }}
+          MOALLEM_VERSION_NAME: 2026.2027.${{ github.run_number }}
+        run: node scripts/prepare-android.mjs
+      - name: Build Debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moallem-Gradebook-Preview-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

@@ -25,6 +25,7 @@ for (const resource of [
   "res/drawable/moallem_widget_today.xml",
   "res/xml/moallem_widget_info.xml",
   "res/values/moallem_widget_styles.xml",
+  "res/xml/moallem_share_paths.xml",
 ]) {
   copyTemplate(join("native/android", resource), join(androidRoot, resource));
 }
@@ -43,6 +44,21 @@ if (!manifest.includes("android.permission.SCHEDULE_EXACT_ALARM")) {
   manifest = manifest.replace("<application", `${permission}\n\n    <application`);
   writeFileSync(manifestPath, manifest);
 }
+if (!manifest.includes('androidx.core.content.FileProvider')) {
+  const provider = `
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${appId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/moallem_share_paths" />
+        </provider>
+`;
+  if (!manifest.includes("</application>")) throw new Error("AndroidManifest.xml is missing the application closing element");
+  manifest = manifest.replace("</application>", `${provider}    </application>`);
+  writeFileSync(manifestPath, manifest);
+}
+
 if (!manifest.includes('android:name=".HomeWidgetProvider"')) {
   const receiver = `\n        <receiver\n            android:name=".HomeWidgetProvider"\n            android:label="دفتر المعلّم"\n            android:exported="true">\n            <intent-filter>\n                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n            </intent-filter>\n            <meta-data android:name="android.appwidget.provider" android:resource="@xml/moallem_widget_info" />\n        </receiver>\n`;
   if (!manifest.includes("</application>")) throw new Error("AndroidManifest.xml is missing the application closing element");
@@ -63,7 +79,7 @@ const appBuildPath = "android/app/build.gradle";
 let appBuild = readFileSync(appBuildPath, "utf8");
 const debugSuffix = process.env.MOALLEM_DEBUG_APP_ID_SUFFIX || ".test";
 if (!/^\.[A-Za-z0-9.]+$/.test(debugSuffix)) throw new Error("MOALLEM_DEBUG_APP_ID_SUFFIX must begin with a dot and contain only letters, digits, or dots");
-const debugLabel = (process.env.MOALLEM_DEBUG_APP_LABEL || "معلّم تجريبي 2026-2027").replaceAll('"', "");
+const debugLabel = (process.env.MOALLEM_DEBUG_APP_LABEL || "معلّم").replaceAll('"', "");
 if (!appBuild.includes("applicationIdSuffix")) {
   appBuild = appBuild.replace("buildTypes {", `buildTypes {\n        debug {\n            // Install test builds beside production without touching its app data.\n            applicationIdSuffix "${debugSuffix}"\n        }`);
 } else {

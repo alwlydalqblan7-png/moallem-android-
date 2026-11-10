@@ -46,7 +46,7 @@ jobs:
       - name: Add Android exact alarm permission and signing config
         env:
           MOALLEM_DEBUG_APP_ID_SUFFIX: .semestergrades
-          MOALLEM_DEBUG_APP_LABEL: معلّم - درجات الفصل الأول
+          MOALLEM_DEBUG_APP_LABEL: معلّم
           MOALLEM_RELEASE_STORE_FILE: ${{ runner.temp }}/moallem-safe202627.jks
           MOALLEM_RELEASE_STORE_PASSWORD: ${{ secrets.MOALLEM_RELEASE_STORE_PASSWORD }}
           MOALLEM_RELEASE_KEY_ALIAS: ${{ secrets.MOALLEM_RELEASE_KEY_ALIAS }}

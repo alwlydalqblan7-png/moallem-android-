@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildStudentProfileHtml, collectStudentProfile } from "../src/student-profile.js";
+import { buildStudentProfileHtml, buildStudentProfileShareText, collectStudentProfile } from "../src/student-profile.js";
 import { createFirstTermColumns, FIRST_TERM_SCHEME_ID } from "../src/semester-grade-scheme.js";
 
 const student = { id: 7, name: "ليان", grade: "الثامن", section: "أ" };
@@ -70,4 +70,31 @@ test("student profile calculates first-term result on a 200-point subject scale"
   const profile = collectStudentProfile({ student, gradebooks: { "الثامن|أ|علم الأحياء": book } });
   assert.equal(profile.grades[0].value, 175);
   assert.equal(profile.grades[0].maximum, 200);
+});
+
+test("full student share includes photo-ready identity, all grades, attendance and notes", () => {
+  const profile = {
+    student: { ...student, photo: "data:image/jpeg;base64,AAAA" },
+    grades: [{ subject: "العلوم", value: 165, maximum: 200, pendingExam: false }],
+    attendanceSummary: { present: 12, absent: 2, late: 1 },
+    attendance: [
+      { date: "2026-10-20", status: "absent", note: "غياب بعذر" },
+      { date: "2026-10-19", status: "present", note: "" },
+    ],
+    homework: [{ type: "مذكرة", title: "أسئلة الوحدة", subject: "العلوم", status: "submitted", dueDate: "2026-10-22" }],
+    notes: [
+      { text: "تحسن في المشاركة", createdAt: "2026-10-21T09:00:00Z" },
+      { text: "يرجى متابعة الواجب", createdAt: "2026-10-18T09:00:00Z" },
+    ],
+  };
+  const html = buildStudentProfileHtml(profile, { school: "ثانوية الشافعي" });
+  const text = buildStudentProfileShareText(profile, { school: "ثانوية الشافعي", teacher: "الوليد" });
+  assert.ok(html.includes("data:image/jpeg;base64,AAAA"));
+  assert.ok(text.includes("العلوم: 165/200"));
+  assert.ok(text.includes("الحضور: 12 يوم | الغياب: 2 يوم | التأخر: 1 يوم"));
+  assert.match(text, /2026-10-20: غائب — غياب بعذر/);
+  assert.match(text, /أسئلة الوحدة/);
+  assert.match(text, /تحسن في المشاركة/);
+  assert.match(text, /يرجى متابعة الواجب/);
+  assert.ok(!text.includes("\\\\n"));
 });

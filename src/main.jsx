@@ -47,13 +47,14 @@ import moallemIcon from "./assets/moallem-icon.png";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { autoColorHtml, mergeSubjectOptions } from "./preparation-format.js";
-import { validateMoallemBackup } from "./backup-format.js";
+import { extractStudentPhotos, validateMoallemBackup } from "./backup-format.js";
 import { inspectDaftarBackup } from "./legacy-backup-inspector.js";
 import { attendanceDateKey, formatClassRoster, getDailyWidgetStatus, parseStudentNames, summarizeAttendance } from "./student-tools.js";
 import { calculateGradebookTotals, normalizeMarkInput } from "./gradebook.js";
+import { formatGradeInArabicWords } from "./arabic-grade-words.js";
 import { calculateSciencePairSummary, calculateSubjectResult } from "./science-summary.js";
 import { buildStudentHomeworkMessage, filterHomeworkForClass, getHomeworkStatus, setHomeworkStatus, summarizeHomework } from "./homework.js";
-import { buildStudentIdentityCardHtml, buildStudentProfileHtml, collectStudentProfile } from "./student-profile.js";
+import { buildStudentIdentityCardHtml, buildStudentProfileHtml, buildStudentProfileShareText, collectStudentProfile } from "./student-profile.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const HomeWidget = registerPlugin("HomeWidget");
 const BackupFile = registerPlugin("BackupFile");
@@ -97,6 +98,9 @@ const DEFAULT_SUBJECTS = [
 ];
 const ADDED_SUBJECTS = ["العلوم", "الفيزياء والكيمياء"];
 const FIRST_TERM_TEACHER_SUBJECTS = new Set(["علم الأحياء", "الإحصاء", "المعلوماتية", "العلوم", "الفيزياء والكيمياء"]);
+const firstTermColumnsForSubject = (maximum, subjectName) => createFirstTermColumns(maximum).map((column) =>
+  subjectName === "الإحصاء" && column.id === "term1_quiz" ? { ...column, name: "مذاكرة خطية" } : column
+);
 const seedStudents = [
   { id: 1, name: "أحمد محمد", grade: "السابع", section: "أ" },
   { id: 2, name: "سارة خالد", grade: "السابع", section: "أ" },
@@ -406,17 +410,19 @@ function App() {
         const key = localStorage.key(i);
         if (key?.startsWith("m2_")) data[key] = localStorage.getItem(key);
       }
+      const photoBackup = extractStudentPhotos(data);
       const pdfs = await Promise.all((await listPdfBlobs()).map(async ({ id, blob }) => ({
         id, data: await blobToDataUrl(blob),
       })));
       const payload = JSON.stringify({
-        format: "moallem-backup-v2", createdAt: new Date().toISOString(), data, pdfs,
+        format: "moallem-backup-v3", createdAt: new Date().toISOString(),
+        data: photoBackup.data, photos: photoBackup.photos, pdfs,
       });
       const filename = "moallem-backup-" + new Date().toISOString().slice(0, 10) + ".json";
       if (Capacitor.isNativePlatform()) {
         try {
           await BackupFile.save({ filename, content: payload });
-          window.alert("تم حفظ النسخة الاحتياطية بنجاح في المكان الذي اخترته.");
+          window.alert(`تم حفظ النسخة الاحتياطية، وتشمل ${photoBackup.photos.length} صورة طالب، في المكان الذي اخترته.`);
         } catch (error) {
           if (String(error?.message || error).includes("CANCELLED")) return;
           window.alert("تعذر حفظ النسخة: " + (error?.message || error));
@@ -432,7 +438,7 @@ function App() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-      window.alert("تم طلب تنزيل النسخة. تأكد من وجود ملف " + filename + " في التنزيلات؛ لا تعتبر النسخ ناجحًا قبل التأكد.");
+      window.alert(`تم طلب تنزيل النسخة التي تشمل ${photoBackup.photos.length} صورة طالب. تأكد من وجود ملف ${filename} في التنزيلات؛ لا تعتبر النسخ ناجحًا قبل التأكد.`);
     } catch (err) {
       window.alert("فشل إنشاء النسخة الاحتياطية: " + (err?.message || "خطأ غير معروف"));
     }
@@ -444,11 +450,11 @@ function App() {
       const validated = validateMoallemBackup(backup);
       const entries = Object.entries(validated.data);
       if (!entries.length) throw new Error("النسخة لا تحتوي بيانات معلّم");
-      if (!window.confirm(`ستستبدل البيانات التي تحمل المفاتيح نفسها${backup.format === "moallem-backup-v2" ? `، وستستبدل مكتبة PDF بـ ${validated.pdfs.length} ملف` : ""}. احفظ نسخة احتياطية مستقلة قبل المتابعة. هل تريد الاستعادة؟`)) return;
+      if (!window.confirm(`ستستبدل البيانات التي تحمل المفاتيح نفسها${["moallem-backup-v2", "moallem-backup-v3"].includes(backup.format) ? `، وستستبدل مكتبة PDF بـ ${validated.pdfs.length} ملف` : ""}. احفظ نسخة احتياطية مستقلة قبل المتابعة. هل تريد الاستعادة؟`)) return;
       const previousValues = Object.fromEntries(entries.map(([key]) => [key, localStorage.getItem(key)]));
-      const previousPdfs = backup.format === "moallem-backup-v2" ? await listPdfBlobs() : null;
+      const previousPdfs = ["moallem-backup-v2", "moallem-backup-v3"].includes(backup.format) ? await listPdfBlobs() : null;
       try {
-        if (backup.format === "moallem-backup-v2") await replaceDecodedPdfBlobs(validated.pdfs);
+        if (["moallem-backup-v2", "moallem-backup-v3"].includes(backup.format)) await replaceDecodedPdfBlobs(validated.pdfs);
         for (const [key, value] of entries) localStorage.setItem(key, value);
       } catch (writeError) {
         let rollbackError = null;
@@ -687,7 +693,14 @@ function App() {
     () => students.filter((s) => s.grade === grade && s.section === section),
     [students, grade, section],
   );
-  const profileStudent = students.find((student) => String(student.id) === String(profileStudentId)) || null;
+  const selectedProfileStudent = students.find((student) => String(student.id) === String(profileStudentId)) || null;
+  const profileRoster = selectedProfileStudent
+    ? students.filter((student) => student.grade === selectedProfileStudent.grade && student.section === selectedProfileStudent.section)
+    : [];
+  const profileStudent = selectedProfileStudent ? {
+    ...selectedProfileStudent,
+    studentNumber: profileRoster.findIndex((student) => String(student.id) === String(selectedProfileStudent.id)) + 1,
+  } : null;
   const studentProfile = useMemo(() => profileStudent ? collectStudentProfile({
     student: profileStudent, gradebooks, attendanceHistory, homeworkItems, notes: studentNotes, officialGradeMaximum, legacyAttendance: attendance,
   }) : null, [profileStudent, gradebooks, attendanceHistory, homeworkItems, studentNotes, attendance]);
@@ -716,11 +729,12 @@ function App() {
   );
   const bookKey = `${grade}|${section}|${subject}`;
   const defaultSubjectMaximum = officialGradeMaximum(grade, subject) || 100;
+  const isStatisticsSubject = subject === "الإحصاء";
   const usesFirstTermScheme = FIRST_TERM_TEACHER_SUBJECTS.has(subject);
   const book = gradebooks[bookKey] || {
     gradingScheme: usesFirstTermScheme ? FIRST_TERM_SCHEME_ID : undefined,
     gradingMaximum: defaultSubjectMaximum,
-    columns: usesFirstTermScheme ? createFirstTermColumns(defaultSubjectMaximum) : officialGradeColumns(grade, subject) || seedColumns,
+    columns: usesFirstTermScheme ? firstTermColumnsForSubject(defaultSubjectMaximum, subject) : officialGradeColumns(grade, subject) || seedColumns,
     marks: {},
   };
   const updateBook = (next) =>
@@ -742,7 +756,7 @@ function App() {
       window.alert("هذا الدفتر يحتوي على علامات محفوظة. لم نغيّرها. أنشئ نسخة احتياطية أولًا، ثم انقل العلامات يدويًا إلى الأعمدة الجديدة لتجنب تغيير درجات الطلاب.");
       return;
     }
-    updateBook({ ...book, gradingScheme: FIRST_TERM_SCHEME_ID, gradingMaximum: defaultSubjectMaximum, columns: createFirstTermColumns(defaultSubjectMaximum), marks: book.marks || {} });
+    updateBook({ ...book, gradingScheme: FIRST_TERM_SCHEME_ID, gradingMaximum: defaultSubjectMaximum, columns: firstTermColumnsForSubject(defaultSubjectMaximum, subject), marks: book.marks || {} });
   };
   const addColumn = () =>
     updateBook({
@@ -1422,6 +1436,33 @@ ${sourceExcerpt}
     if (!studentProfile) return;
     printDocument(`ملف متابعة ${profileStudent.name}`, buildStudentProfileHtml(studentProfile, schoolSettings));
   };
+  const shareStudentFullProfile = async () => {
+    if (!studentProfile || !profileStudent) return;
+    const text = buildStudentProfileShareText(studentProfile, schoolSettings);
+    const title = `بطاقة الطالب الكاملة — ${profileStudent.name}`;
+    try {
+      if (Capacitor.isNativePlatform()) {
+        await ShareText.shareProfile({
+          text,
+          title,
+          photo: profileStudent.photo || "",
+          fileName: `student-${String(profileStudent.id).replace(/[^a-zA-Z0-9_-]/g, "")}.jpg`,
+        });
+      } else if (profileStudent.photo && navigator.share && navigator.canShare && typeof File === "function") {
+        const response = await fetch(profileStudent.photo);
+        const photoFile = new File([await response.blob()], `student-${profileStudent.id}.jpg`, { type: "image/jpeg" });
+        const payload = { title, text, files: [photoFile] };
+        if (navigator.canShare({ files: payload.files })) await navigator.share(payload);
+        else await shareText(text, title);
+      } else {
+        await shareText(text, title);
+      }
+      setStudentPhotoMessage("تم فتح خيارات المشاركة؛ أرفق التطبيق صورة الطالب مع تفاصيل ملفه.");
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      setStudentPhotoMessage(error?.message || "تعذرت مشاركة بطاقة الطالب كاملة.");
+    }
+  };
   const shareStudentProfileHomework = () => {
     if (!studentProfile) return;
     shareText(buildStudentHomeworkMessage({
@@ -1617,16 +1658,21 @@ ${sourceExcerpt}
     }
   };
   const buildGradebookHtml = () => {
-    const heads = book.columns.map((c) => `<th>${c.name}<br><small>/${c.max}</small></th>`).join("");
-    const courseworkHead = firstTermScheme ? `<th>محصلة الفصل الأول /${firstTermMaximum}</th>` : split200 && finalExamColumn ? `<th>درجة الأعمال /${officialMax}</th>` : "";
+    const heads = book.columns.map((c) => `<th>${isStatisticsSubject && c.id === "term1_quiz" ? "مذاكرة خطية" : c.name}<br><small>/${c.max}</small></th>`).join("");
+    const courseworkHead = firstTermScheme ? `<th>درجة أعمال الفصل الأول /${firstTermMaximum}</th>` : split200 && finalExamColumn ? `<th>درجة الأعمال /${officialMax}</th>` : "";
     const rows = classStudents.map((s, i) => {
       const c = calc(s);
       const coursework = c.split ? `<td>${c.works}/${c.firstTerm ? firstTermMaximum : officialMax}</td>` : "";
       const final = c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`;
-      return `<tr><td>${i + 1}</td><td>${s.name}</td>${book.columns.map((col) => `<td>${book.marks[s.id]?.[col.id] ?? ""}</td>`).join("")}${coursework}<td>${final}</td><td>${c.pct}%</td></tr>`;
+      const finalValue = c.final == null && c.split ? null : c.got;
+      const failing = finalValue != null && c.max > 0 && finalValue < c.max / 2;
+      const failClass = failing ? ' class="failing-mark"' : "";
+      const written = finalValue == null ? "—" : formatGradeInArabicWords(finalValue);
+      const pair = showSciencePairSummary ? calculateSciencePairSummary(gradebooks, grade, section, s.id, officialGradeMaximum) : null;
+      return `<tr><td>${i + 1}</td><td>${s.name}</td>${book.columns.map((col) => `<td>${book.marks[s.id]?.[col.id] ?? ""}</td>`).join("")}${coursework}<td${failClass}>${final}</td><td>${c.pct}%</td>${pair ? `<td>${pair.science ?? "—"}</td><td>${pair.physicsChemistry ?? "—"}</td><td>${pair.total ?? "—"}</td>` : ""}<td${failClass}>${written}</td></tr>`;
     }).join("");
-    const finalHead = split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `العلامة النهائية /${firstTermMaximum}` : "المجموع";
-    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px}h1,h2{text-align:center}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #333;padding:7px;text-align:center}</style></head><body><h1>دفتر العلامات</h1><h2>${grade} — الشعبة ${section}</h2><p>المادة: ${subject}</p><table><tr><th>#</th><th>اسم الطالب</th>${heads}${courseworkHead}<th>${finalHead}</th><th>النسبة</th></tr>${rows}</table></body></html>`;
+    const finalHead = split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `محصلة الفصل الأول /${firstTermMaximum}` : "المجموع";
+    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px}h1,h2{text-align:center}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #333;padding:7px;text-align:center}.failing-mark{color:#c62828;text-decoration:underline;text-decoration-color:#c62828;text-decoration-thickness:2px}</style></head><body><h1>دفتر العلامات</h1><h2>${grade} — الشعبة ${section}</h2><p>المادة: ${subject}</p><table><tr><th>#</th><th>اسم الطالب</th>${heads}${courseworkHead}<th>${finalHead}</th><th>النسبة</th>${showSciencePairSummary ? "<th>محصلة العلوم</th><th>محصلة الفيزياء والكيمياء</th><th>مجموع المحصلتين</th>" : ""}<th>كتابة</th></tr>${rows}</table></body></html>`;
   };
   const buildReportCardsHtml = () => {
     const cards = classStudents
@@ -2013,13 +2059,14 @@ ${sourceExcerpt}
                     <span className="eyebrow">بطاقة الطالب · متابعة خاصة</span>
                     <h2>{profileStudent.name}</h2>
                     <p>{profileStudent.grade} — الشعبة {profileStudent.section}</p>
-                    <small>رقم الطالب: {profileStudent.id}</small>
+                    <small>رقم الطالب: {profileStudent.studentNumber}</small>
                   </div>
                   <input ref={studentPhotoInputRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={saveStudentPhoto} />
                   <div className="actions student-id-actions">
                     <button type="button" onClick={() => studentPhotoInputRef.current?.click()}><Camera size={16}/>{profileStudent.photo ? "تغيير الصورة" : "إضافة صورة"}</button>
                     {profileStudent.photo && <button type="button" className="danger" onClick={removeStudentPhoto}>حذف الصورة</button>}
                     <button type="button" onClick={printStudentIdentityCard}><PrinterIcon size={16}/> طباعة البطاقة</button>
+                    <button type="button" onClick={shareStudentFullProfile}><Share2 size={16}/> مشاركة البطاقة كاملة</button>
                   </div>
                 </div>
                 {studentPhotoMessage && <p className="note" role="status">{studentPhotoMessage}</p>}
@@ -2266,21 +2313,22 @@ ${sourceExcerpt}
                               </div>
                             ) : (
                               <>
-                                {c.name}
+                                {isStatisticsSubject && c.id === "term1_quiz" ? "مذاكرة خطية" : c.name}
                                 <small>/{c.max}</small>
                               </>
                             )}
                           </th>
                         ))}
                         {split200 && finalExamColumn && <th>درجة الأعمال /{officialMax}</th>}
-                        {firstTermScheme && <th>محصلة الفصل الأول /{firstTermMaximum}</th>}
-                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `العلامة النهائية /${firstTermMaximum}` : "المجموع"}</th>
+                        {firstTermScheme && <th>درجة أعمال الفصل الأول /{firstTermMaximum}</th>}
+                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `محصلة الفصل الأول /${firstTermMaximum}` : "المجموع"}</th>
                         <th>النسبة</th>
                         {showSciencePairSummary && <>
                           <th>محصلة العلوم</th>
                           <th>محصلة الفيزياء والكيمياء</th>
                           <th>مجموع المحصلتين</th>
                         </>}
+                        <th>كتابة</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2289,6 +2337,8 @@ ${sourceExcerpt}
                         const pair = showSciencePairSummary
                           ? calculateSciencePairSummary(gradebooks, grade, section, s.id, officialGradeMaximum)
                           : null;
+                        const finalValue = c.final == null && c.split ? null : c.got;
+                        const failing = finalValue != null && c.max > 0 && finalValue < c.max / 2;
                         return (
                           <tr key={s.id}>
                             <td>{i + 1}</td>
@@ -2309,7 +2359,7 @@ ${sourceExcerpt}
                             {c.split && <td><b>{c.works}/{c.firstTerm ? firstTermMaximum : officialMax}</b></td>}
                             <td>
                               <b>
-                                {c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`}
+                                <span className={failing ? "failing-mark" : ""}>{c.final == null && c.split ? "بانتظار الامتحان" : `${c.got}/${c.max}`}</span>
                               </b>
                             </td>
                             <td>
@@ -2320,6 +2370,7 @@ ${sourceExcerpt}
                               <td><b>{pair.physicsChemistry ?? "—"}</b></td>
                               <td><b>{pair.total ?? "—"}</b></td>
                             </>}
+                            <td><b className={failing ? "failing-mark" : ""}>{finalValue == null ? "—" : formatGradeInArabicWords(finalValue)}</b></td>
                           </tr>
                         );
                       })}
