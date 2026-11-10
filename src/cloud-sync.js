@@ -1,4 +1,6 @@
-const API = import.meta.env.VITE_SYNC_API_URL || "https://moallem-sync.liondangerous65.workers.dev";
+const API = (import.meta.env.VITE_SYNC_API_URL || "https://moallem-sync.liondangerous65.workers.dev")
+  .replace(/\/+$/, "")
+  .replace(/\/api$/i, "");
 const PREFIX = "m2_";
 const ACCOUNT_KEY = "moallem.sync.account";
 const DB_NAME = "moallem_cloud_sync";
