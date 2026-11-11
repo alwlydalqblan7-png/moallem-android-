@@ -1,5 +1,5 @@
 import { isTeacherSpecified200Subject, officialGradeColumns, officialGradeMaximum } from "./official-grade-distribution.js";
-import { calculateFirstTermResult, createFirstTermColumns, FIRST_TERM_SCHEME_ID } from "./semester-grade-scheme.js";
+import { calculateFirstTermResult, createFirstTermColumns, FIRST_TERM_SCHEME_ID, migrateStatisticsGradebooks } from "./semester-grade-scheme.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -98,9 +98,11 @@ const DEFAULT_SUBJECTS = [
 ];
 const ADDED_SUBJECTS = ["العلوم", "الفيزياء والكيمياء"];
 const FIRST_TERM_TEACHER_SUBJECTS = new Set(["علم الأحياء", "الإحصاء", "المعلوماتية", "العلوم", "الفيزياء والكيمياء"]);
-const firstTermColumnsForSubject = (maximum, subjectName) => createFirstTermColumns(maximum).map((column) =>
-  subjectName === "الإحصاء" && column.id === "term1_quiz" ? { ...column, name: "مذاكرة خطية" } : column
-);
+const firstTermColumnsForSubject = (maximum, subjectName) => createFirstTermColumns(maximum).map((column) => ({
+  ...column,
+  ...(subjectName === "الإحصاء" && column.id === "term1_quiz" ? { name: "مذاكرة خطية" } : {}),
+  ...(subjectName === "الإحصاء" && column.id === "term1_exam" ? { name: "الامتحان الأخير" } : {}),
+}));
 const seedStudents = [
   { id: 1, name: "أحمد محمد", grade: "السابع", section: "أ" },
   { id: 2, name: "سارة خالد", grade: "السابع", section: "أ" },
@@ -543,7 +545,7 @@ function App() {
   const [attendanceHistory, setAttendanceHistory] = useState(() => load("m2_attendance_history", {}));
   const [attendanceDate, setAttendanceDate] = useState(() => localDateKey());
   const [attendanceMessage, setAttendanceMessage] = useState("");
-  const [gradebooks, setGradebooks] = useState(() => load("m2_gradebooks", {}));
+  const [gradebooks, setGradebooks] = useState(() => migrateStatisticsGradebooks(load("m2_gradebooks", {})));
   const [grade, setGrade] = useState(() => load("m2_grade", "السابع"));
   const [section, setSection] = useState(() => load("m2_section", "أ"));
   const [subject, setSubject] = useState(() =>
@@ -1686,7 +1688,7 @@ ${sourceExcerpt}
       const pair = showSciencePairSummary ? calculateSciencePairSummary(gradebooks, grade, section, s.id, officialGradeMaximum) : null;
       return `<tr><td>${i + 1}</td><td>${s.name}</td>${book.columns.map((col) => `<td>${book.marks[s.id]?.[col.id] ?? ""}</td>`).join("")}${coursework}<td${failClass}>${final}</td><td>${c.pct}%</td>${pair ? `<td>${pair.science ?? "—"}</td><td>${pair.physicsChemistry ?? "—"}</td><td>${pair.total ?? "—"}</td>` : ""}<td${failClass}>${written}</td></tr>`;
     }).join("");
-    const finalHead = split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `محصلة الفصل الأول /${firstTermMaximum}` : "المجموع";
+    const finalHead = split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `المعدل النهائي /${firstTermMaximum}` : "المجموع";
     return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>body{font-family:Arial;padding:24px}h1,h2{text-align:center}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #333;padding:7px;text-align:center}.failing-mark{color:#c62828;text-decoration:underline;text-decoration-color:#c62828;text-decoration-thickness:2px}</style></head><body><h1>دفتر العلامات</h1><h2>${grade} — الشعبة ${section}</h2><p>المادة: ${subject}</p><table><tr><th>#</th><th>اسم الطالب</th>${heads}${courseworkHead}<th>${finalHead}</th><th>النسبة</th>${showSciencePairSummary ? "<th>محصلة العلوم</th><th>محصلة الفيزياء والكيمياء</th><th>مجموع المحصلتين</th>" : ""}<th>كتابة</th></tr>${rows}</table></body></html>`;
   };
   const buildReportCardsHtml = () => {
@@ -2328,7 +2330,7 @@ ${sourceExcerpt}
                               </div>
                             ) : (
                               <>
-                                {isStatisticsSubject && c.id === "term1_quiz" ? "مذاكرة خطية" : c.name}
+                                {isStatisticsSubject && c.id === "term1_quiz" ? "مذاكرة خطية" : isStatisticsSubject && c.id === "term1_exam" ? "الامتحان الأخير" : c.name}
                                 <small>/{c.max}</small>
                               </>
                             )}
@@ -2336,7 +2338,7 @@ ${sourceExcerpt}
                         ))}
                         {split200 && finalExamColumn && <th>درجة الأعمال /{officialMax}</th>}
                         {firstTermScheme && <th>درجة أعمال الفصل الأول /{firstTermMaximum}</th>}
-                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `محصلة الفصل الأول /${firstTermMaximum}` : "المجموع"}</th>
+                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `المعدل النهائي /${firstTermMaximum}` : "المجموع"}</th>
                         <th>النسبة</th>
                         {showSciencePairSummary && <>
                           <th>محصلة العلوم</th>
