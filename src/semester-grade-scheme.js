@@ -11,6 +11,29 @@ export function createFirstTermColumns(maximum = 100) {
   const max = Number.isFinite(Number(maximum)) && Number(maximum) > 0 ? Number(maximum) : 100;
   return columns.map((column) => ({ ...column, max: column.id === "term1_exam" ? max : max * column.max / 100 }));
 }
+export function calculateEleventhStatisticsResult(book, studentId) {
+  const marks = book?.marks?.[studentId] ?? book?.marks?.[String(studentId)] ?? {};
+  const courseworkMark = (id, maximum) => {
+    const raw = marks[id];
+    if (raw === "" || raw == null) return 0;
+    const normalized = normalizeMarkInput(raw, maximum);
+    return normalized === "" ? 0 : normalized;
+  };
+  const work =
+    courseworkMark("term1_oral", 25) +
+    courseworkMark("term1_homework", 25) +
+    courseworkMark("term1_quiz", 50);
+  const rawExam = marks.term1_exam;
+  const exam = rawExam === "" || rawExam == null ? null : normalizeMarkInput(rawExam, 100);
+  return {
+    work,
+    exam,
+    value: exam == null ? work : (work + exam) / 2,
+    maximum: 100,
+    pendingExam: exam == null,
+  };
+}
+
 export function calculateFirstTermResult(book, studentId) {
   const savedColumns = Array.isArray(book?.columns) ? book.columns : [];
   const marks = book?.marks?.[studentId] ?? book?.marks?.[String(studentId)] ?? {};
