@@ -1,4 +1,4 @@
-const API = (import.meta.env.VITE_SYNC_API_URL || "https://moallem-sync.liondangerous65.workers.dev")
+const API = (import.meta.env.VITE_SYNC_API_URL || "https://moallem-sync.liondangerous65.workers.dev").trim().replace(/\\/+$/, "").replace(/\\/api$/i, "")
   .replace(/\/+$/, "")
   .replace(/\/api$/i, "");
 const PREFIX = "m2_";
@@ -223,7 +223,7 @@ window.addEventListener("online", () => { render(); scheduleSync(300); });
 window.addEventListener("offline", render);
 window.addEventListener("focus", () => scheduleSync(250));
 document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleSync(250); });
-setInterval(() => { if (account && !document.hidden) synchronize(); }, 45000);
+setInterval(() => { if (account && !document.hidden) synchronize(); }, 5000);
 window.addEventListener("DOMContentLoaded", async () => {
   render();
   if (await restoreAccount()) { render(); if (navigator.onLine) synchronize(); }
