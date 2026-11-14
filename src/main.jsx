@@ -100,7 +100,7 @@ const ADDED_SUBJECTS = ["العلوم", "الفيزياء والكيمياء"];
 const FIRST_TERM_TEACHER_SUBJECTS = new Set(["علم الأحياء", "الإحصاء", "المعلوماتية", "العلوم", "الفيزياء والكيمياء"]);
 const firstTermColumnsForSubject = (maximum, subjectName) => createFirstTermColumns(maximum).map((column) => ({
   ...column,
-  ...(subjectName === "الإحصاء" && column.id === "term1_quiz" ? { name: "مذاكرة خطية" } : {}),
+  ...(subjectName === "الإحصاء" && column.id === "term1_quiz" ? { name: "مذاكرة" } : {}),
   ...(subjectName === "الإحصاء" && column.id === "term1_exam" ? { name: "الامتحان الأخير" } : {}),
 }));
 const seedStudents = [
@@ -1678,8 +1678,8 @@ ${sourceExcerpt}
     }
   };
   const buildGradebookHtml = () => {
-    const heads = book.columns.map((c) => `<th>${isStatisticsSubject && c.id === "term1_quiz" ? "مذاكرة خطية" : c.name}<br><small>/${c.max}</small></th>`).join("");
-    const courseworkHead = firstTermScheme ? `<th>درجة أعمال الفصل الأول /${firstTermMaximum}</th>` : split200 && finalExamColumn ? `<th>درجة الأعمال /${officialMax}</th>` : "";
+    const heads = book.columns.map((c) => `<th>${isStatisticsSubject && c.id === "term1_quiz" ? "مذاكرة" : c.name}<br><small>/${c.max}</small></th>`).join("");
+    const courseworkHead = firstTermScheme ? `<th>${isEleventhStatistics ? "محصلة الأعمال" : "درجة أعمال الفصل الأول"} /${firstTermMaximum}</th>` : split200 && finalExamColumn ? `<th>درجة الأعمال /${officialMax}</th>` : "";
     const rows = classStudents.map((s, i) => {
       const c = calc(s);
       const coursework = c.split ? `<td>${c.works}/${c.firstTerm ? firstTermMaximum : officialMax}</td>` : "";
@@ -2333,7 +2333,7 @@ ${sourceExcerpt}
                               </div>
                             ) : (
                               <>
-                                {isStatisticsSubject && c.id === "term1_quiz" ? "مذاكرة خطية" : isStatisticsSubject && c.id === "term1_exam" ? "الامتحان الأخير" : c.name}
+                                {isStatisticsSubject && c.id === "term1_quiz" ? "مذاكرة" : isStatisticsSubject && c.id === "term1_exam" ? "الامتحان الأخير" : c.name}
                                 <small>/{c.max}</small>
                               </>
                             )}
