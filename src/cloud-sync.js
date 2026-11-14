@@ -15,6 +15,29 @@ const toHex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).pa
 const localKeys = () => Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter(Boolean);
 const localData = () => Object.fromEntries(localKeys().filter((k) => k.startsWith(PREFIX)).sort().map((k) => [k, localStorage.getItem(k)]));
 const emptyData = (data) => Object.keys(data || {}).length === 0;
+const meaningfulLocalData = (data) => {
+  const read = (key, fallback) => { try { return JSON.parse(data?.[key] ?? "null") ?? fallback; } catch { return fallback; } };
+  const students = read("m2_students", []);
+  const seeded = [
+    { id: 1, name: "أحمد محمد", grade: "السابع", section: "أ" },
+    { id: 2, name: "سارة خالد", grade: "السابع", section: "أ" },
+    { id: 3, name: "وليد محمود", grade: "السابع", section: "أ" },
+    { id: 4, name: "لانا علي", grade: "السابع", section: "ب" },
+    { id: 5, name: "عمر حسن", grade: "الثامن", section: "أ" },
+    { id: 6, name: "ريم يوسف", grade: "الثامن", section: "أ" },
+  ];
+  const hasItems = (value) => Array.isArray(value) ? value.length > 0 :
+    value && typeof value === "object" ? Object.keys(value).length > 0 : Boolean(value);
+  const sameSeedRoster = Array.isArray(students) && JSON.stringify(students) === JSON.stringify(seeded);
+  if (Array.isArray(students) && students.length && !sameSeedRoster) return true;
+  for (const key of [
+    "m2_gradebooks", "m2_attendance", "m2_attendance_history", "m2_student_notes",
+    "m2_saved_preparations", "m2_knowledge_bank", "m2_homework",
+    "m2_curriculum_plans", "m2_weekly_schedule", "m2_library_books",
+  ]) if (hasItems(read(key, null))) return true;
+  const school = read("m2_school_settings", {});
+  return Object.values(school || {}).some((value) => typeof value === "string" && value.trim());
+};
 const sameData = (a, b) => {
   const stable = (value) => JSON.stringify(Object.fromEntries(Object.entries(value || {}).sort(([x], [y]) => x.localeCompare(y))));
   return stable(a) === stable(b);
@@ -114,7 +137,7 @@ const synchronize = async () => {
     }
     const cloud = await decrypt(remote.snapshot);
     if (!baseline) {
-      if (emptyData(local)) { await applyData(cloud); return; }
+      if (emptyData(local) || !meaningfulLocalData(local)) { await applyData(cloud); return; }
       if (sameData(local, cloud)) { baseline = local; await localPut("baseline:" + account.email, local); status("الجهاز متصل بالحساب", "ok"); return; }
       showConflict(local, remote.snapshot, remoteVersion, "هذه أول مزامنة لهذا الجهاز، ووجدنا بيانات محفوظة في الحساب وعلى الجهاز.");
       return;
