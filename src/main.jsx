@@ -1,5 +1,5 @@
 import { isTeacherSpecified200Subject, officialGradeColumns, officialGradeMaximum } from "./official-grade-distribution.js";
-import { calculateFirstTermResult, createFirstTermColumns, FIRST_TERM_SCHEME_ID } from "./semester-grade-scheme.js";
+import { calculateEleventhStatisticsResult, calculateFirstTermResult, createFirstTermColumns, FIRST_TERM_SCHEME_ID } from "./semester-grade-scheme.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -729,6 +729,7 @@ function App() {
   const bookKey = `${grade}|${section}|${subject}`;
   const defaultSubjectMaximum = officialGradeMaximum(grade, subject) || 100;
   const isStatisticsSubject = subject === "الإحصاء";
+  const isEleventhStatistics = grade === "الحادي عشر" && isStatisticsSubject;
   const usesFirstTermScheme = FIRST_TERM_TEACHER_SUBJECTS.has(subject);
   const book = gradebooks[bookKey] || {
     gradingScheme: usesFirstTermScheme ? FIRST_TERM_SCHEME_ID : undefined,
@@ -804,7 +805,9 @@ function App() {
   const calc = (s) => {
     const m = book.marks[s.id] || {};
     if (firstTermScheme) {
-      const result = calculateFirstTermResult(book, s.id);
+      const result = isEleventhStatistics
+        ? calculateEleventhStatisticsResult(book, s.id)
+        : calculateFirstTermResult(book, s.id);
       return { got: result.value, max: result.maximum, pct: Math.round((result.value / result.maximum) * 1000) / 10,
         works: result.work, exam: result.exam, final: result.pendingExam ? null : result.value, split: true, firstTerm: true };
     }
