@@ -1,4 +1,4 @@
-const API = (import.meta.env.VITE_SYNC_API_URL || "https://moallem-sync.liondangerous65.workers.dev").trim().replace(/\\/+$/, "").replace(/\\/api$/i, "")
+const API = (import.meta.env.VITE_SYNC_API_URL || "https://moallem-sync.liondangerous65.workers.dev").trim().replace(/\/+$/, "").replace(/\/api$/i, "");
   .replace(/\/+$/, "")
   .replace(/\/api$/i, "");
 const PREFIX = "m2_";
