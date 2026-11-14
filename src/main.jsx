@@ -810,7 +810,7 @@ function App() {
       },
     });
   const officialMax = officialGradeMaximum(grade, subject);
-  const firstTermScheme = book.gradingScheme === FIRST_TERM_SCHEME_ID;
+  const firstTermScheme = isEleventhStatistics || book.gradingScheme === FIRST_TERM_SCHEME_ID;
   const firstTermMaximum = Number(book.columns.find((column) => column.id === "term1_exam")?.max) || defaultSubjectMaximum;
   const split200 = !firstTermScheme && Boolean(officialMax);
   const finalExamColumn = book.columns.find(c => c.id === "official_final_exam");
@@ -2340,8 +2340,8 @@ ${sourceExcerpt}
                           </th>
                         ))}
                         {split200 && finalExamColumn && <th>درجة الأعمال /{officialMax}</th>}
-                        {firstTermScheme && <th>درجة أعمال الفصل الأول /{firstTermMaximum}</th>}
-                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `المعدل النهائي /${firstTermMaximum}` : "المجموع"}</th>
+                        {firstTermScheme && <th>{isEleventhStatistics ? "محصلة الأعمال" : "درجة أعمال الفصل الأول"} /{firstTermMaximum}</th>}
+                        <th>{split200 && finalExamColumn ? `العلامة النهائية /${officialMax}` : firstTermScheme ? `${isEleventhStatistics ? "المحصلة النهائية" : "المعدل النهائي"} /${firstTermMaximum}` : "المجموع"}</th>
                         <th>النسبة</th>
                         {showSciencePairSummary && <>
                           <th>محصلة العلوم</th>
